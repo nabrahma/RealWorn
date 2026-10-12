@@ -57,6 +57,10 @@ class RW_PT_object(_Base, bpy.types.Panel):
         if p.edge_source != "ATTRIBUTE" and context.scene.render.engine.startswith("BLENDER_EEVEE"):
             lay.label(text="EEVEE: Bevel source falls back to Attribute", icon="INFO")
         lay.prop(p, "cavity_source")
+        row = lay.row(align=True)
+        row.operator("realworn.paint_wear", text="Paint Wear", icon="BRUSH_DATA").channel = "ADD"
+        row.operator("realworn.paint_wear", text="", icon="REMOVE").channel = "REMOVE"
+        row.operator("realworn.paint_wear", text="", icon="MOD_FLUIDSIM").channel = "DRY"
         shared = [m for m in weathering.materials_of(ob) if m.users > 1]
         if shared:
             box = lay.box()
