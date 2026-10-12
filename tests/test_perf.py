@@ -59,7 +59,24 @@ def _render(scene, path, engine, samples=16, res=96):
 
 
 def test_eevee_first_compile(empty_scene, out_dir):
-    ob = ms.bevel_cube(empty_scene, material=ms.principled("EeveeCompile", (0.3, 0.3, 0.6)))
+    import random
+    mat = ms.principled("EeveeCompile", (0.3, 0.3, 0.6))
+    # a random chain of math ops makes this a shader EEVEE has never compiled (earlier tests in
+    # the same run would otherwise leave it cached and the measurement would read ~0)
+    nt = mat.node_tree
+    src = nt.nodes.new("ShaderNodeValue")
+    src.outputs[0].default_value = 0.4
+    sock = src.outputs[0]
+    for _ in range(6):
+        m = nt.nodes.new("ShaderNodeMath")
+        m.operation = random.choice(("ADD", "MULTIPLY", "SINE", "COSINE", "ABSOLUTE", "SQRT", "MINIMUM", "MAXIMUM",
+                                     "FRACT", "TANH"))
+        m.inputs[1].default_value = 0.5
+        m.use_clamp = True
+        nt.links.new(sock, m.inputs[0])
+        sock = m.outputs[0]
+    nt.links.new(sock, nt.nodes["Principled BSDF"].inputs["Roughness"])
+    ob = ms.bevel_cube(empty_scene, material=mat)
     ms.camera_light(empty_scene, cam_loc=(3, -3, 2.5), target=(0, 0, 1))
     weathering.apply_object(ob, empty_scene)
     first = _render(empty_scene, os.path.join(out_dir, "eevee_compile_1.png"), "BLENDER_EEVEE")
@@ -67,8 +84,8 @@ def test_eevee_first_compile(empty_scene, out_dir):
     compile_s = max(first - second, 0.0)
     print("\n[perf] EEVEE first render {:.2f} s, second {:.2f} s -> compile ~{:.2f} s".format(first, second, compile_s))
     record("EEVEE shader compile, one weathered material", compile_s, "s", 3,
-           "first minus second headless render, warm GPU driver cache; a cold compile right after the "
-           "stack changes measured 4.8 s")
+           "first minus second headless render of a never-compiled shader; GPU driver cache state "
+           "varies (a cold compile right after the stack changed measured 4.8 s)")
     assert compile_s < 6.0  # hard ceiling; the 3 s budget is judged in docs/perf.md (cold cache varies)
 
 

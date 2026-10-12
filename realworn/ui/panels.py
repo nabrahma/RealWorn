@@ -35,6 +35,7 @@ class RW_PT_scene(_Base, bpy.types.Panel):
         row = lay.row(align=True)
         row.operator("realworn.mark_occluder", icon="MOD_SOLIDIFY").state = True
         row.operator("realworn.mark_occluder", text="", icon="X").state = False
+        lay.operator("realworn.scene_preset", text="Rainy Night", icon="OUTLINER_OB_LIGHT").preset = "RAINY_NIGHT"
 
 
 class RW_PT_object(_Base, bpy.types.Panel):
@@ -162,6 +163,22 @@ class RW_PT_damage(_Base, bpy.types.Panel):
         row.prop(masks._input_item(mod, "Use Exact"), "value", text="Exact Solver", toggle=True)
 
 
+class RW_PT_bake(_Base, bpy.types.Panel):
+    bl_label = "Bake"
+    bl_idname = "RW_PT_bake"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        p = context.scene.realworn
+        lay = self.layout
+        lay.prop(p, "bake_resolution")
+        lay.prop(p, "bake_folder")
+        lay.prop(p, "bake_masks")
+        row = lay.row(align=True)
+        row.operator("realworn.bake", icon="RENDER_STILL")
+        row.operator("realworn.bake_restore", icon="LOOP_BACK")
+
+
 class RW_PT_debug(_Base, bpy.types.Panel):
     bl_label = "Debug"
     bl_idname = "RW_PT_debug"
@@ -171,11 +188,18 @@ class RW_PT_debug(_Base, bpy.types.Panel):
         p = context.scene.realworn
         lay = self.layout
         lay.prop(p, "mask_preview")
+        lay.operator("realworn.validate", icon="CHECKMARK")
         lay.operator("realworn.add_masks", icon="MOD_DATA_TRANSFER")
         lay.operator("realworn.remove_all", icon="TRASH")
+        from ..props import prefs
+        pr = prefs()
+        if pr is not None and pr.developer_mode:
+            row = lay.row(align=True)
+            row.operator("realworn.reload", icon="FILE_REFRESH")
+            row.operator("realworn.rebuild_assets", icon="NODETREE")
 
 
-_classes = (RW_PT_scene, RW_PT_object, RW_PT_mask_settings, RW_PT_decals, RW_PT_damage, RW_PT_debug)
+_classes = (RW_PT_scene, RW_PT_object, RW_PT_mask_settings, RW_PT_decals, RW_PT_damage, RW_PT_bake, RW_PT_debug)
 
 
 def register():

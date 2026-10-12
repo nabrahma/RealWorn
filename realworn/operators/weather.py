@@ -43,7 +43,23 @@ class RW_OT_mark_occluder(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_mark_ground, RW_OT_mark_occluder)
+class RW_OT_scene_preset(bpy.types.Operator):
+    """Apply a scene look: Rainy Night sets wet weather, a hazy night world, two practical
+    lights and a compositor with bloom, vignette and film grain"""
+    bl_idname = "realworn.scene_preset"
+    bl_label = "Scene Preset"
+    bl_options = {"REGISTER", "UNDO"}
+
+    preset: bpy.props.EnumProperty(name="Preset", items=[("RAINY_NIGHT", "Rainy Night", "")], default="RAINY_NIGHT")
+
+    def execute(self, context):
+        from ..core import scene_presets
+        made = scene_presets.rainy_night(context.scene)
+        self.report({"INFO"}, "Rainy Night: " + ", ".join(made))
+        return {"FINISHED"}
+
+
+_classes = (RW_OT_mark_ground, RW_OT_mark_occluder, RW_OT_scene_preset)
 
 
 def register():

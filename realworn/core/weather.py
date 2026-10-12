@@ -57,7 +57,8 @@ def sync_wet_variant():
     node = stack.nodes.get(naming.STACK_WET_NODE)
     if node is None:
         return False
-    target = naming.SH_L_WET if wet_needed() else naming.SH_L_WET_DRY
+    rain = any(s.realworn.rain for s in bpy.data.scenes)
+    target = naming.SH_L_WET_RAIN if rain else (naming.SH_L_WET if wet_needed() else naming.SH_L_WET_DRY)
     if node.node_tree is not None and node.node_tree.name == target:
         return False
     from . import assets

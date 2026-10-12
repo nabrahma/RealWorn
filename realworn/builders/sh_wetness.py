@@ -60,8 +60,10 @@ def build_dry():
     return t.t
 
 
-def build():
-    t = Tree.new_group(naming.SH_L_WET, "SHADER")
+def build_wet(with_rain):
+    """with_rain=False drops the ripple/droplet subgraph (two Voronoi behind a Bump that EEVEE and
+    Cycles evaluate three times); RW_Stack swaps variants by the scene sliders."""
+    t = Tree.new_group(naming.SH_L_WET_RAIN if with_rain else naming.SH_L_WET, "SHADER")
     _interface(t)
     wet, rain, shel, dry = t.I("Wetness"), t.I("Rain"), t.I("Shelter"), t.I("Keep Dry")
     metal, poro = t.I("Metallic"), t.I("Porosity")
@@ -112,24 +114,34 @@ def build():
     gn = t.comb(0.0, 0.0, 1.0)
     normal = t.mixv(puddle, t.I("Normal"), gn)  # base bump fades out under standing water
 
+    coat_base = t.mixv(coat_w, t.I("Coat Normal"), normal)  # water film follows the surface
+    coat_base = t.mixv(puddle, coat_base, gn)
+    if not with_rain:
+        coat_normal = coat_base
+        return _finish(t, col, rough, metal, normal, coat_weight, coat_r, coat_ior, coat_normal, w, puddle)
     # Rain: ripple rings in puddles, droplets on other up-facing wet surfaces (coat normal only)
     time = t.value(0.0, label="time (driver: frame / 24)", name=TIME_NODE)
     px, py, _ = t.sep(t.outp(geo, "Position"))
-    vor = t.node("ShaderNodeTexVoronoi", t.comb(px, py, 0.0), Scale=5.0, props={"voronoi_dimensions": "3D"})
+    # 2D Voronoi: about half the cost of 3D, and Bump evaluates it three times per sample
+    vor = t.node("ShaderNodeTexVoronoi", t.comb(px, py, 0.0), Scale=5.0, props={"voronoi_dimensions": "2D"})
     cell = t.sep(t.outp(vor, "Color"))[0]
     phase = t.math("FRACT", t.add(t.mul(time, 0.9), cell))
     ring_d = t.math("ABSOLUTE", t.sub(t.outp(vor, "Distance"), t.mul(phase, 0.55)))
     ripple = t.mul_all(t.inv(t.smooth(ring_d, 0.0, 0.05)), t.inv(phase), puddle, rain)
-    drops_v = t.node("ShaderNodeTexVoronoi", t.comb(t.mul(px, 1.0), t.mul(py, 1.0), t.mul(time, 0.5)),
-                     Scale=45.0, props={"voronoi_dimensions": "3D"})
+    drops_v = t.node("ShaderNodeTexVoronoi", t.comb(px, py, 0.0), Scale=45.0, props={"voronoi_dimensions": "2D"})
     drops = t.mul_all(t.inv(t.smooth(t.outp(drops_v, "Distance"), 0.0, 0.25)), rain, coat_w,
                       t.inv(puddle), t.smooth(t.I("Normal Z"), 0.5, 0.9))
-    coat_base = t.mixv(coat_w, t.I("Coat Normal"), normal)  # water film follows the surface
-    coat_base = t.mixv(puddle, coat_base, gn)
     bump = t.node("ShaderNodeBump", 1.0, 1.0, Height=t.add(t.mul(ripple, 0.0025), t.mul(drops, 0.0006)),
                   Normal=coat_base)
     coat_normal = t.outp(bump)
+    _finish(t, col, rough, metal, normal, coat_weight, coat_r, coat_ior, coat_normal, w, puddle)
+    fc = t.t.driver_add('nodes["{}"].outputs[0].default_value'.format(TIME_NODE))
+    fc.driver.type = "SCRIPTED"
+    fc.driver.expression = "frame / 24"
+    return t.t
 
+
+def _finish(t, col, rough, metal, normal, coat_weight, coat_r, coat_ior, coat_normal, w, puddle):
     t.O("Color", col)
     t.O("Roughness", rough)
     t.O("Metallic", metal)
@@ -141,8 +153,8 @@ def build():
     t.O("W", w)
     t.O("Puddle", puddle)
     t.layout()
+    return t.t
 
-    fc = t.t.driver_add('nodes["{}"].outputs[0].default_value'.format(TIME_NODE))
-    fc.driver.type = "SCRIPTED"
-    fc.driver.expression = "frame / 24"
-    return [t.t, build_dry()]
+
+def build():
+    return [build_wet(False), build_wet(True), build_dry()]

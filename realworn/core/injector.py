@@ -117,6 +117,7 @@ def _new_stack(tree, idx, frame, x, y):
 def _inject_channel(tree, principled, idx, frame, out):
     px, py = _abs(principled)
     stack, geom = _new_stack(tree, idx, frame, px - 320, py)
+    stack["rw_principled"] = principled.name  # Bake swaps and Restore Live Stack relink by this
     for ch in naming.CHANNELS:
         pin, sin = principled.inputs[ch], stack.inputs[ch]
         src = nodeutil.link_source(pin)
@@ -140,6 +141,7 @@ def _inject_shader(tree, out, frame):
     src = nodeutil.link_source(out.inputs["Surface"])
     stack, geom = _new_stack(tree, 0, frame, ox - 700, oy - 260)
     bsdf = nodeutil.new(tree, "ShaderNodeBsdfPrincipled", "overlay_bsdf", frame=frame)
+    stack["rw_principled"] = bsdf.name
     _place(bsdf, ox - 420, oy - 260)
     for ch in naming.CHANNELS:
         if ch in naming.NORMAL_CHANNELS:

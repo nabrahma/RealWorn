@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "realworn"
 version = "0.7.0"
 name = "RealWorn"
-tagline = "One-click wear, grime, wetness, decals and damage with scene weather"
+tagline = "One-click wear, grime, wetness, decals, damage and weather"
 maintainer = "Nabaskar"
 type = "add-on"
 blender_version_min = "5.2.0"
@@ -15,7 +15,7 @@ license = [
 tags = ["Material", "Node"]
 
 [permissions]
-files = "Writes baked textures to a user-chosen folder and reads decal images"
+files = "Writes baked textures and reads decal images"
 
 [build]
 paths_exclude_pattern = [

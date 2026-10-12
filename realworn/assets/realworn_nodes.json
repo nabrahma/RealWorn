@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "build": "69dcf906339d",
+ "build": "baed0b3e4924",
  "groups": [
   "RW_BevelEdge",
   "RW_Breakup",
@@ -15,6 +15,7 @@
   "RW_L_Rust",
   "RW_L_Wetness",
   "RW_L_WetnessDry",
+  "RW_L_WetnessRain",
   "RW_Masks",
   "RW_RayCavity",
   "RW_ShadingMasks",

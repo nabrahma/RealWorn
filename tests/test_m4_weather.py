@@ -55,9 +55,10 @@ def _drivers():
 
 
 def test_no_drivers_except_shared_time(yard):
-    yard["scene"].realworn.wetness = 0.9  # full wetness group in use
+    yard["scene"].realworn.wetness = 0.9
+    yard["scene"].realworn.rain = True  # the rain variant (the only one with the time driver) in use
     drv = _drivers()
-    assert {d[0] for d in drv} == {naming.SH_L_WET}, drv
+    assert {d[0] for d in drv} == {naming.SH_L_WET_RAIN}, drv
     assert len(drv) == 1  # one per file, shared by every material (WX-8)
 
 
@@ -83,7 +84,7 @@ def test_wet_variant_follows_sliders(yard):
     assert node.node_tree.name == naming.SH_L_WET
     sc.realworn.wetness = 0.0
     sc.realworn.rain = True
-    assert node.node_tree.name == naming.SH_L_WET
+    assert node.node_tree.name == naming.SH_L_WET_RAIN
 
 
 def test_sync_survives_save_and_reload(yard, out_dir):
