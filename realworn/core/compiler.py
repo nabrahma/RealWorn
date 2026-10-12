@@ -235,11 +235,14 @@ def _channel_source(b, layer, name, ch, scalar):
     """The B value of one channel: flat value, image, PBR set map or tinted grunge."""
     role = name
     if ch.source in ("IMAGE", "PBRSET") and ch.image is not None:
-        if ch.use_uv:
+        baked = bool(ch.image.get("rw_baked"))  # Flatten output: painted space, sampled through RW_Paint
+        if baked:
+            vec = _paint_uv(b)
+        elif ch.use_uv:
             vec = b.outp(b.named("ShaderNodeUVMap", role + ".uv"))
         else:
             vec = _box_vector(b, role, ch.scale)
-        img = _image_node(b, role + ".img", ch.image, vec, non_color=scalar, box=not ch.use_uv)
+        img = _image_node(b, role + ".img", ch.image, vec, non_color=scalar, box=not (ch.use_uv or baked))
         out = img.outputs["Color"]
         if name == "height":  # image height (0..1) scaled by the channel value in mm
             out = b.mul(out, b.value_node(role + ".value", ch.value))
@@ -386,11 +389,12 @@ def compile(mat):
     out = dict(cur)
     out["Normal"] = normal
     for name, _ in naming.STACK_OUTPUTS:
-        if name in ("Displacement", "Coverage", "Mask View", "Layer Color"):
+        if name in ("Displacement", "Coverage", "Mask View", "Layer Color", "Height"):
             continue
         b.links.new(out[name], go.inputs[name])
+    ctx["height_out"] = cur["Height"]  # layer relief in mm (bake reads it)
     for name, key in (("Displacement", "displacement"), ("Coverage", "coverage"), ("Mask View", "mask_view"),
-                      ("Layer Color", "layer_color")):
+                      ("Layer Color", "layer_color"), ("Height", "height_out")):
         if ctx[key] is not None:
             b.links.new(ctx[key], go.inputs[name])
     b.end(300 * (len(mat.realworn.layers) + 1))

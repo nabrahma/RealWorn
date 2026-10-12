@@ -73,6 +73,11 @@ class _Base:
 
 
 def _draw_header(layout, context, ob, mat):
+    if mat is not None and mat.realworn.applied and mat.realworn.stack is None:
+        box = layout.box()
+        box.label(text="Weathered with RealWorn v0.7", icon="ERROR")
+        box.operator("realworn.migrate_v07", icon="LOOP_BACK")
+        return False
     if ob is None or ob.type != "MESH":
         layout.label(text="Select a mesh object", icon="INFO")
         return False
@@ -305,6 +310,9 @@ class RW_PT_bake(_Base, bpy.types.Panel):
     def draw(self, context):
         p = context.scene.realworn
         lay = self.layout
+        ob, mat = _context_material(context)
+        if mat.realworn.baked:
+            lay.label(text="Showing baked textures", icon="IMAGE_DATA")
         opx(lay, "realworn.flatten", icon="RENDERLAYERS")
         lay.prop(p, "bake_resolution")
         lay.prop(p, "bake_folder")

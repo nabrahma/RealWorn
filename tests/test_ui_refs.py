@@ -10,7 +10,7 @@ import bpy
 from realworn.core import layer_types as LT
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NOT_YET = {"flatten", "bake", "restore_live", "export_textures"}
+NOT_YET = set()  # every operator the UI references must exist (P8)
 
 
 def _sources():

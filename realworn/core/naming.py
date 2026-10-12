@@ -81,6 +81,7 @@ STACK_OUTPUTS = (
     ("Base Color", "COLOR"), ("Roughness", "FLOAT"), ("Metallic", "FLOAT"), ("Normal", "VECTOR"),
     ("Coat Weight", "FLOAT"), ("Coat Roughness", "FLOAT"), ("Coat IOR", "FLOAT"), ("Coat Normal", "VECTOR"),
     ("Displacement", "FLOAT"), ("Coverage", "FLOAT"), ("Mask View", "FLOAT"), ("Layer Color", "COLOR"),
+    ("Height", "FLOAT"),
 )
 # Principled inputs routed through the stack.
 CHANNELS = ("Base Color", "Roughness", "Metallic", "Normal", "Coat Weight", "Coat Roughness", "Coat IOR",
