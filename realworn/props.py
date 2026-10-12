@@ -24,6 +24,9 @@ PREVIEW_ITEMS = [
     ("SHELTER", "Shelter", "rw_shelter: covered by an occluder"),
     ("PUDDLE", "Puddle", "Final puddle mask"),
     ("WETNESS", "Wetness", "Effective wetness w"),
+    ("DUST", "Dust", "Final dust mask"),
+    ("GRIME", "Grime", "Contact and splash grime mask"),
+    ("STREAK", "Streak", "Vertical streak mask"),
 ]
 EDGE_SOURCE_ITEMS = [
     ("ATTRIBUTE", "Attribute", "rw_edge from the RW_Masks modifier (Cycles and EEVEE)"),

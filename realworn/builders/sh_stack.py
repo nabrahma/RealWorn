@@ -143,7 +143,7 @@ def build():
     w_simple = t.clamp(t.mul_all(wet, t.inv(shelter), t.inv(p_dry)))
     l6 = _grp(t, naming.SH_L_DUST, Color=t.outp(l5, "Color"), Roughness=t.outp(l5, "Roughness"),
               Metallic=t.outp(l5, "Metallic"), Height=t.outp(l5, "Height"), Up=t.outp(sm, "Up"), Breakup=large,
-              Shelter=shelter, Wet=w_simple, Amount=t.mul_all(t.I("Dust"), scene[naming.SC_DUST], 2.5, keep),
+              Shelter=shelter, Wet=w_simple, Amount=t.mul_all(t.I("Dust"), scene[naming.SC_DUST], 1.6, keep),
               Dust_Color=t.I("Dust Color"))
 
     # ---- height -> bump on top of the user's own normal (normal maps survive).
@@ -176,7 +176,9 @@ def build():
     sel = scene[naming.SC_PREVIEW]
     prev = None
     for code, val in ((1, edge), (2, cavity), (3, geo[naming.ATTR_CONTACT]), (4, shelter),
-                      (5, t.outp(l8, "Puddle")), (6, t.outp(l8, "W"))):
+                      (5, t.outp(l8, "Puddle")), (6, t.outp(l8, "W")), (7, t.outp(l6, "Mask")),
+                      (8, t.outp(l5, "Grime")), (9, t.outp(t.node("ShaderNodeMath", t.outp(sm, "Streak"), 0.0,
+                                                                   props={"operation": "ADD"})))):
         term = t.mul(t.math("COMPARE", sel, float(code), 0.5), val)
         prev = term if prev is None else t.add(prev, term)
     t.O("Preview", prev)

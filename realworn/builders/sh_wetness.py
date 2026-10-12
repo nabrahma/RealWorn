@@ -107,7 +107,9 @@ def build():
     coat_ior = t.mixf(puddle, coat_ior, 1.33)
 
     geo = t.node("ShaderNodeNewGeometry")
-    gn = t.outp(geo, "Normal")
+    # standing water is level: world up, not the (possibly faceted) surface normal; puddles
+    # only form where the surface is within ~20 degrees of flat, so this is always valid
+    gn = t.comb(0.0, 0.0, 1.0)
     normal = t.mixv(puddle, t.I("Normal"), gn)  # base bump fades out under standing water
 
     # Rain: ripple rings in puddles, droplets on other up-facing wet surfaces (coat normal only)

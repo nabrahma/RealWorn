@@ -38,6 +38,7 @@ OBJECT_PROPS = (OB_SEED, OB_WEAR, OB_DIRT, OB_GROUND)
 # Mask preview codes (scene property rw_preview).
 PREVIEW_CODES = {
     "NONE": 0, "EDGE": 1, "CAVITY": 2, "CONTACT": 3, "SHELTER": 4, "PUDDLE": 5, "WETNESS": 6,
+    "DUST": 7, "GRIME": 8, "STREAK": 9,
 }
 
 # Node groups.

@@ -255,6 +255,8 @@ def build_grime():
     t.inp("Streak Amount", "FLOAT", 0.0, 0.0, 4.0)
     t.inp("Grime Color", "COLOR", (0.12, 0.10, 0.075))
     _channels_out(t)
+    t.out("Grime", "FLOAT")
+    t.out("Streak", "FLOAT")
     splash = t.mul_all(t.pow(t.clamp(t.I("Splash")), 1.5), t.inv(t.mul(t.I("Up"), 0.8)), t.inv(t.I("Is Ground")))
     base = t.max(t.I("Contact"), splash)
     m = t.clamp(t.mul_all(base, t.add(0.35, t.mul(t.I("Breakup"), 0.9)), t.I("Amount")))
@@ -266,6 +268,8 @@ def build_grime():
     t.O("Metallic", t.mixf(m, t.I("Metallic"), 0.0))
     t.O("Height", t.I("Height"))
     t.O("Mask", t.max(m, sm))
+    t.O("Grime", m)
+    t.O("Streak", sm)
     t.layout()
     return t.t
 
@@ -283,7 +287,7 @@ def build_dust():
     _channels_out(t)
     raw = t.mul_all(t.I("Up"), t.add(0.25, t.I("Breakup")), t.I("Amount"),
                     t.inv(t.mul(t.I("Shelter"), 0.6)), t.inv(t.I("Wet")))
-    m = t.smooth(raw, 0.1, 0.7)
+    m = t.mul(t.smooth(raw, 0.12, 0.9), 0.85)  # settles in patches, never a full repaint
     t.O("Color", t.mix(m, t.I("Color"), t.I("Dust Color")))
     t.O("Roughness", t.mixf(m, t.I("Roughness"), 0.95))
     t.O("Metallic", t.mixf(m, t.I("Metallic"), 0.0))

@@ -17,10 +17,24 @@ class RW_PT_scene(_Base, bpy.types.Panel):
 
     def draw(self, context):
         p = context.scene.realworn
-        col = self.layout.column(align=True)
+        lay = self.layout
+        col = lay.column(align=True)
         for prop in ("age", "dirt", "dust", "wetness"):
             col.prop(p, prop, slider=True)
-        self.layout.prop(p, "rain")
+        lay.prop(p, "rain", icon="MOD_FLUIDSIM")
+        col = lay.column(align=True)
+        col.prop(p, "splash_height")
+        row = col.row(align=True)
+        row.prop(p, "ground_z_auto", text="Auto Ground Z")
+        sub = row.row(align=True)
+        sub.enabled = not p.ground_z_auto
+        sub.prop(p, "ground_z", text="")
+        row = lay.row(align=True)
+        row.operator("realworn.mark_ground", icon="VIEW_PERSPECTIVE").state = True
+        row.operator("realworn.mark_ground", text="", icon="X").state = False
+        row = lay.row(align=True)
+        row.operator("realworn.mark_occluder", icon="MOD_SOLIDIFY").state = True
+        row.operator("realworn.mark_occluder", text="", icon="X").state = False
 
 
 class RW_PT_object(_Base, bpy.types.Panel):

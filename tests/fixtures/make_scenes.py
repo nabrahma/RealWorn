@@ -146,7 +146,10 @@ def street(scene, name="Street", size=(6.0, 4.0), tiles=8, location=(0, 0, 0), m
         gy = abs(((v.co.y + size[1] / 2) / step_x) % 1.0 - 0.5)
         if gx > 0.45 or gy > 0.45:
             v.co.z -= 0.01
-    return _link(scene, name, bm, location, material)
+    ob = _link(scene, name, bm, location, material)
+    for p in ob.data.polygons:
+        p.use_smooth = True
+    return ob
 
 
 def kerb(scene, name="Kerb", length=6.0, location=(0, 1.8, 0.075), material=None):

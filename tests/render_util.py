@@ -73,3 +73,41 @@ def save_sheet(images, path, cols=None):
     out.file_format = "PNG"
     out.save()
     bpy.data.images.remove(out)
+
+
+def load_rgba(path):
+    img = bpy.data.images.load(os.path.abspath(path), check_existing=False)
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    return px.reshape(h, w, 4)
+
+
+def preview(scene, mode, path, cam_loc, target, ortho, res=(96, 96), engine="CYCLES", samples=4):
+    """Render one Mask Preview as raw linear values; returns (value HxW, coverage HxW bool).
+
+    Row 0 is the bottom of the image (Blender pixel order)."""
+    from realworn.core import preview as pv
+    look_at(scene.camera, cam_loc, target, ortho_scale=ortho)
+    setup(scene, engine=engine, samples=samples, res=res)
+    scene.view_settings.view_transform = "Raw"
+    scene.render.film_transparent = True
+    scene.render.image_settings.file_format = "OPEN_EXR"
+    scene.render.image_settings.color_mode = "RGBA"
+    path = os.path.splitext(path)[0] + ".exr"
+    held = [o for o in scene.objects if o.type == "MESH" and not o.modifiers.get("RW_Masks") and not o.is_holdout]
+    for o in held:  # objects without RealWorn do not show a preview; keep them out of the coverage
+        o.is_holdout = True
+    pv.set_preview(scene, mode)
+    scene.render.filepath = os.path.abspath(path)
+    bpy.ops.render.render(write_still=True)
+    pv.set_preview(scene, "NONE")
+    for o in held:
+        o.is_holdout = False
+    scene.render.film_transparent = False
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGB"
+    scene.view_settings.view_transform = "Standard"
+    px = load_rgba(path)
+    return px[:, :, 0], px[:, :, 3] > 0.99
