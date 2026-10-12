@@ -228,11 +228,11 @@ class Tree:
         if label:
             n.label = label
         suffix = {"RGBA": "Color", "FLOAT": "Float", "VECTOR": "Vector"}[dtype]
-        fac_id = "Factor_Float"
-        self.set(n.inputs[fac_id], fac)
-        self.set(n.inputs["A_" + suffix], a)
-        self.set(n.inputs["B_" + suffix], b)
-        return n.outputs["Result_" + suffix]
+        ins = {s.identifier: s for s in n.inputs}
+        self.set(ins["Factor_Float"], fac)
+        self.set(ins["A_" + suffix], a)
+        self.set(ins["B_" + suffix], b)
+        return next(s for s in n.outputs if s.identifier == "Result_" + suffix)
 
     def mixf(self, fac, a, b, label=None):
         return self.mix(fac, a, b, dtype="FLOAT", label=label)

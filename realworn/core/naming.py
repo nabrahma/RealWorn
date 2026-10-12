@@ -53,13 +53,14 @@ SH_L_CAVITY = "RW_L_CavityDirt"
 SH_L_GRIME = "RW_L_Grime"
 SH_L_DUST = "RW_L_Dust"
 SH_L_WET = "RW_L_Wetness"
+SH_L_WET_DRY = "RW_L_WetnessDry"
 SH_DECAL = "RW_L_Decal"
 SH_DECAL_PROJECT = "RW_DecalProject"
 SH_BEVEL_EDGE = "RW_BevelEdge"
 SH_RAY_CAVITY = "RW_RayCavity"
 ALL_GROUPS = (
     GN_MASKS, GN_DAMAGE, SH_BREAKUP, SH_SHADING_MASKS, SH_L_EDGE, SH_L_RUST, SH_L_DECALS,
-    SH_L_CAVITY, SH_L_GRIME, SH_L_DUST, SH_L_WET, SH_STACK, SH_DECAL, SH_DECAL_PROJECT,
+    SH_L_CAVITY, SH_L_GRIME, SH_L_DUST, SH_L_WET, SH_L_WET_DRY, SH_STACK, SH_DECAL, SH_DECAL_PROJECT,
     SH_BEVEL_EDGE, SH_RAY_CAVITY,
 )
 
@@ -74,6 +75,7 @@ COLL_DECALS = "RW_Decals"
 
 # Nodes inserted into user materials.
 NODE_PREFIX = "RW::"
+STACK_WET_NODE = "wetness"  # node name of the wetness group inside RW_Stack
 OWNED_PROP = "rw_owned"
 FRAME_LABEL = "RealWorn"
 DECAL_PREFIX = "RW_Decal_"

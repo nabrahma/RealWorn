@@ -1,0 +1,14 @@
+{
+  "id": "inner",
+  "label": "Inner (break faces)",
+  "porosity": 0.6,
+  "breakup_scale": 2.0,
+  "layers": {
+    "edge_wear": {"enabled": false, "strength": 0.0, "underlayer": "aggregate"},
+    "rust": {"enabled": false, "strength": 0.0},
+    "cavity_dirt": {"enabled": true, "color": [0.06, 0.055, 0.05], "strength": 0.9},
+    "contact_grime": {"enabled": false, "strength": 0.0},
+    "dust": {"enabled": true, "color": [0.62, 0.6, 0.56], "strength": 0.6},
+    "streaks": {"enabled": false, "strength": 0.0}
+  }
+}

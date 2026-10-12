@@ -2,7 +2,7 @@
 
 import bpy
 
-from ..core import masks, naming
+from ..core import masks, naming, weathering
 
 
 class _Base:
@@ -36,7 +36,33 @@ class RW_PT_object(_Base, bpy.types.Panel):
         if not masks.is_supported(ob):
             lay.label(text="{}: not a mesh".format(ob.name), icon="ERROR")
             return
-        lay.operator("realworn.add_masks", icon="MOD_DATA_TRANSFER")
+        sp = context.scene.realworn
+        p = ob.realworn
+        lay.prop(sp, "preset")
+        row = lay.row(align=True)
+        row.scale_y = 1.3
+        row.operator("realworn.apply", icon="BRUSH_DATA")
+        row.operator("realworn.update", icon="FILE_REFRESH")
+        row.operator("realworn.remove", icon="X")
+        if not p.applied:
+            return
+        lay.label(text="Preset: {}".format(p.preset or "AUTO"))
+        col = lay.column(align=True)
+        col.prop(p, "wear", slider=True)
+        col.prop(p, "dirt", slider=True)
+        row = lay.row(align=True)
+        row.prop(p, "seed")
+        row.operator("realworn.randomize_seed", text="", icon="FILE_REFRESH")
+        lay.prop(p, "edge_source")
+        if p.edge_source != "ATTRIBUTE" and context.scene.render.engine.startswith("BLENDER_EEVEE"):
+            lay.label(text="EEVEE: Bevel source falls back to Attribute", icon="INFO")
+        lay.prop(p, "cavity_source")
+        shared = [m for m in weathering.materials_of(ob) if m.users > 1]
+        if shared:
+            box = lay.box()
+            box.label(text="{} shared material(s), {} users".format(len(shared), max(m.users for m in shared)),
+                      icon="LINKED")
+            box.operator("realworn.make_single_user")
         if masks.has_nonuniform_scale(ob):
             lay.label(text="Non-uniform scale: widths use the mean scale", icon="ERROR")
         if masks.large_ngon_count(ob.data):
@@ -70,7 +96,10 @@ class RW_PT_debug(_Base, bpy.types.Panel):
 
     def draw(self, context):
         p = context.scene.realworn
-        self.layout.prop(p, "mask_preview")
+        lay = self.layout
+        lay.prop(p, "mask_preview")
+        lay.operator("realworn.add_masks", icon="MOD_DATA_TRANSFER")
+        lay.operator("realworn.remove_all", icon="TRASH")
 
 
 _classes = (RW_PT_scene, RW_PT_object, RW_PT_mask_settings, RW_PT_debug)

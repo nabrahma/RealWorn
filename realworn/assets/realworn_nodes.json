@@ -1,7 +1,20 @@
 {
  "schema": 1,
- "build": "1fa403c47755",
+ "build": "3a65cfd1725b",
  "groups": [
-  "RW_Masks"
+  "RW_BevelEdge",
+  "RW_Breakup",
+  "RW_L_CavityDirt",
+  "RW_L_DecalApply",
+  "RW_L_Dust",
+  "RW_L_EdgeWear",
+  "RW_L_Grime",
+  "RW_L_Rust",
+  "RW_L_Wetness",
+  "RW_L_WetnessDry",
+  "RW_Masks",
+  "RW_RayCavity",
+  "RW_ShadingMasks",
+  "RW_Stack"
  ]
 }

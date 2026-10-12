@@ -1,0 +1,16 @@
+{
+  "id": "plastic",
+  "label": "Plastic",
+  "porosity": 0.0,
+  "breakup_scale": 1.5,
+  "layers": {
+    "edge_wear": {"enabled": true, "strength": 0.55, "underlayer": "whitened",
+                  "primer_color": [0.5, 0.5, 0.5], "primer_width": 0.0,
+                  "chip_sharpness": 0.25, "chip_bump": 0.0, "polish": 0.0},
+    "rust": {"enabled": false, "strength": 0.0},
+    "cavity_dirt": {"enabled": true, "color": [0.06, 0.055, 0.05], "strength": 0.6},
+    "contact_grime": {"enabled": true, "strength": 0.4, "color": [0.12, 0.10, 0.08]},
+    "dust": {"enabled": true, "color": [0.6, 0.58, 0.55], "strength": 0.3},
+    "streaks": {"enabled": false, "strength": 0.0}
+  }
+}

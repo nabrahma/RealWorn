@@ -21,7 +21,7 @@ def _falloff(t, dist, width):
     return t.maprange(dist, 0.0, width, 1.0, 0.0, interp="SMOOTHSTEP")
 
 
-def _edge_distance_mask(t, mesh, selection, width, blur):
+def _edge_distance_mask(t, mesh, selection, width, blur, broad=0.0):
     """Mask that is 1 on the selected edges and falls off over `width`."""
     keep_only = t.node("GeometryNodeDeleteGeometry", mesh, t.bool_op("NOT", selection),
                        props={"domain": "EDGE", "mode": "EDGE_FACE"}, label="Keep selected edges")
@@ -32,7 +32,11 @@ def _edge_distance_mask(t, mesh, selection, width, blur):
     # Blur works in vertex rings; bound its reach to 3x the width in metres so coarse
     # meshes do not smear the band across whole faces.
     reach = t.mul(_falloff(t, dist, t.mul(width, 3.0)), valid)
-    return t.max(sharp, t.mul(t.outp(blurred), reach))
+    out = t.max(sharp, t.mul(t.outp(blurred), reach))
+    if broad:
+        # "plus blurred concavity": a soft, wide term so dirt fades out of corners gradually
+        out = t.max(out, t.mul_all(_falloff(t, dist, t.mul(width, 5.0)), valid, broad))
+    return out
 
 
 def build():
@@ -86,7 +90,7 @@ def build():
     convex = t.compare(angle, thr, "GREATER_THAN")
     concave = t.compare(angle, t.mul(thr, -1.0), "LESS_THAN")
     edge = _edge_distance_mask(t, mesh, convex, edge_w, t.I("Blur Iterations"))
-    cavity = _edge_distance_mask(t, mesh, concave, cav_w, t.I("Blur Iterations"))
+    cavity = _edge_distance_mask(t, mesh, concave, cav_w, t.I("Blur Iterations"), broad=0.45)
 
     # Contact: distance to RW_Ground surfaces in this object's space.
     ground = t.node("GeometryNodeCollectionInfo", t.I("Ground"), props={"transform_space": "RELATIVE"})

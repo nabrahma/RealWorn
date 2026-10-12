@@ -1,8 +1,8 @@
 """Operators: thin wrappers that validate context and call core."""
 
-from . import debug
+from . import apply, debug
 
-_modules = (debug,)
+_modules = (apply, debug)
 
 
 def register():

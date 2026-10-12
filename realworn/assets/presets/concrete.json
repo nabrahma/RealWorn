@@ -1,0 +1,16 @@
+{
+  "id": "concrete",
+  "label": "Concrete",
+  "porosity": 0.8,
+  "breakup_scale": 0.8,
+  "layers": {
+    "edge_wear": {"enabled": true, "strength": 0.6, "underlayer": "aggregate",
+                  "primer_color": [0.5, 0.5, 0.5], "primer_width": 0.0,
+                  "chip_sharpness": 0.3, "chip_bump": 0.001, "polish": 0.0},
+    "rust": {"enabled": false, "strength": 0.0},
+    "cavity_dirt": {"enabled": true, "color": [0.06, 0.055, 0.05], "strength": 0.8},
+    "contact_grime": {"enabled": true, "strength": 0.7, "color": [0.13, 0.11, 0.08]},
+    "dust": {"enabled": true, "color": [0.6, 0.57, 0.52], "strength": 0.4},
+    "streaks": {"enabled": true, "strength": 0.6}
+  }
+}

@@ -35,9 +35,35 @@ def sync_scene(scene):
         changed |= _put(scene, k, v)
     if naming.SC_PREVIEW not in scene:
         scene[naming.SC_PREVIEW] = 0.0
+    changed |= sync_wet_variant()
     if changed:
         _refresh(scene)
     return changed
+
+
+def wet_needed():
+    return any(s.realworn.wetness > 0.0 or s.realworn.rain for s in bpy.data.scenes)
+
+
+def sync_wet_variant():
+    """Point RW_Stack at the full wetness group only while some scene is wet or raining.
+
+    One edit of the shared group updates every material; files opened without the add-on
+    keep whichever variant matched their sliders when saved.
+    """
+    stack = bpy.data.node_groups.get(naming.SH_STACK)
+    if stack is None:
+        return False
+    node = stack.nodes.get(naming.STACK_WET_NODE)
+    if node is None:
+        return False
+    target = naming.SH_L_WET if wet_needed() else naming.SH_L_WET_DRY
+    if node.node_tree is not None and node.node_tree.name == target:
+        return False
+    from . import assets
+    assets.ensure_groups((target,))
+    node.node_tree = bpy.data.node_groups[target]
+    return True
 
 
 def _refresh(scene):

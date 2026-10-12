@@ -99,6 +99,9 @@ def ensure_groups(names=naming.ALL_GROUPS):
 
     Returns the number of groups appended or upgraded.
     """
+    if asset_stale():  # dev checkout with edited builders: never ship or load stale groups
+        build_asset_file()
+        _remove_orphans()
     build = asset_build()
     todo = [n for n in names if n not in bpy.data.node_groups
             or not _is_current(bpy.data.node_groups[n], build)]
@@ -130,6 +133,12 @@ def ensure_groups(names=naming.ALL_GROUPS):
         bpy.data.node_groups.remove(old)
     _dedupe()
     return len(todo)
+
+
+def _remove_orphans():
+    for g in list(bpy.data.node_groups):
+        if g.name.startswith("RW_") and g.users == 0:
+            bpy.data.node_groups.remove(g)
 
 
 def group(name):

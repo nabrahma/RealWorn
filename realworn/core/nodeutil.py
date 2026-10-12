@@ -80,7 +80,8 @@ def resolve(tree, ref):
 
 
 def link_source(sock):
-    """The socket feeding `sock`, skipping nothing; None if unlinked."""
-    if sock.is_linked and sock.links:
+    """The socket feeding `sock`; None if unlinked or the link is muted (a muted link
+    behaves as if it were not there)."""
+    if sock.is_linked and sock.links and not sock.links[0].is_muted:
         return sock.links[0].from_socket
     return None
