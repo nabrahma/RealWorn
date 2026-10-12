@@ -78,6 +78,8 @@ def build():
     t.inp("Decal Darken", "FLOAT", 0.0, 0.0, 1.0)
     t.inp("Decal Damage", "FLOAT", 0.0, 0.0, 1.0)
     t.inp("Decal Height", "FLOAT", 0.0)
+    t.inp("Decal Normal", "VECTOR", hide_value=True)
+    t.inp("Decal Normal Alpha", "FLOAT", 0.0, 0.0, 1.0)
     for name, st, default, lo, hi, desc in PRESET_INPUTS:
         t.inp(name, st, default, lo, hi, description=desc)
     for name, st, _ in CHANNEL_INPUTS:
@@ -150,7 +152,8 @@ def build():
     # Only chips and decals add relief: Cycles evaluates a Bump's height subtree three
     # times, so keeping it small matters (rust/dirt relief was too small to see anyway).
     height = t.add(t.outp(l2, "Height"), t.I("Decal Height"))
-    bump = t.node("ShaderNodeBump", 1.0, 1.0, Height=height, Normal=t.I("Normal"))
+    base_normal = t.mixv(t.I("Decal Normal Alpha"), t.I("Normal"), t.I("Decal Normal"))
+    bump = t.node("ShaderNodeBump", 1.0, 1.0, Height=height, Normal=base_normal)
 
     # ---- puddle height source (WX-3): material height, else inverted luminance + large noise
     lum = t.inv(t.lum(t.I("Base Color")))

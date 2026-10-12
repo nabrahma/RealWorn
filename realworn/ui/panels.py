@@ -107,6 +107,28 @@ class RW_PT_mask_settings(_Base, bpy.types.Panel):
             col.prop(item, "value", text=name)
 
 
+class RW_PT_decals(_Base, bpy.types.Panel):
+    bl_label = "Decals"
+    bl_idname = "RW_PT_decals"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        p = context.scene.realworn
+        lay = self.layout
+        lay.template_icon_view(p, "decal_image", show_labels=True, scale=5.0)
+        lay.prop(p, "decal_mode", expand=True)
+        lay.prop(p, "decal_size")
+        row = lay.row(align=True)
+        op = row.operator("realworn.decal_place", text="Place", icon="RESTRICT_SELECT_OFF")
+        op.mode, op.size = p.decal_mode, p.decal_size
+        op = row.operator("realworn.decal_place", text="At Cursor", icon="PIVOT_CURSOR")
+        op.use_cursor, op.mode, op.size = True, p.decal_mode, p.decal_size
+        row = lay.row(align=True)
+        row.operator("realworn.decal_auto_leaks", icon="MOD_OCEAN")
+        row.prop(p, "leak_seed", text="Seed")
+        lay.operator("realworn.decal_cleanup", icon="BRUSH_DATA")
+
+
 class RW_PT_debug(_Base, bpy.types.Panel):
     bl_label = "Debug"
     bl_idname = "RW_PT_debug"
@@ -120,7 +142,7 @@ class RW_PT_debug(_Base, bpy.types.Panel):
         lay.operator("realworn.remove_all", icon="TRASH")
 
 
-_classes = (RW_PT_scene, RW_PT_object, RW_PT_mask_settings, RW_PT_debug)
+_classes = (RW_PT_scene, RW_PT_object, RW_PT_mask_settings, RW_PT_decals, RW_PT_debug)
 
 
 def register():

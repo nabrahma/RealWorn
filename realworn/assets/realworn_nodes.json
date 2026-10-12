@@ -1,10 +1,12 @@
 {
  "schema": 1,
- "build": "61452278f2c4",
+ "build": "e98204759134",
  "groups": [
   "RW_BevelEdge",
   "RW_Breakup",
+  "RW_DecalProject",
   "RW_L_CavityDirt",
+  "RW_L_Decal",
   "RW_L_DecalApply",
   "RW_L_Dust",
   "RW_L_EdgeWear",
