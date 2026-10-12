@@ -54,6 +54,9 @@ def apply_defaults(layer, kind):
             c.value = dc["value"]
     for k in ("use_height_blend", "height_blend", "lock_source", "lock_strength", "threshold", "softness"):
         setattr(layer, k, d[k])
+    if kind == "DAMAGE":
+        from . import damage
+        damage.set_inner(layer)
 
 
 def add_layer(mat, kind="CUSTOM", name=None, index=None):

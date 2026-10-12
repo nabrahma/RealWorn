@@ -1,11 +1,12 @@
 {
  "schema": 2,
- "build": "3c6c33950dec",
+ "build": "3a9df3a407f5",
  "groups": [
   "RW_Damage",
   "RW_DecalProject",
   "RW_Masks",
   "RW_P_Contrast",
+  "RW_P_Damage",
   "RW_P_EdgeLock",
   "RW_P_HeightBlend",
   "RW_P_Levels",

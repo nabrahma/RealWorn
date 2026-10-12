@@ -10,7 +10,7 @@ import bpy
 from realworn.core import layer_types as LT
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NOT_YET = {"damage_apply", "decal_bake", "decal_place", "flatten", "bake", "restore_live", "export_textures"}
+NOT_YET = {"decal_bake", "decal_place", "flatten", "bake", "restore_live", "export_textures"}
 
 
 def _sources():

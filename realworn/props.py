@@ -71,6 +71,16 @@ def _active_layer(self, context):
     compiler.on_active_layer(self)
 
 
+def _damage_inner(self, context):
+    """DMG-1: the inner material choice sets the Damage layer's channels to its look."""
+    from .core import compiler, damage
+    mat = self.id_data
+    layer = mat.path_resolve(self.path_from_id().rsplit(".", 1)[0])
+    with compiler.batch(mat):
+        damage.set_inner(layer)
+    compiler.on_struct(self)
+
+
 def _ground(self, context):
     from .core import masks
     masks.mark_ground(self.id_data, self.is_ground, sync_prop=False)
@@ -139,12 +149,14 @@ class RWWater(bpy.types.PropertyGroup):
 
 class RWDamage(bpy.types.PropertyGroup):
     depth_mode: EnumProperty(name="Depth", items=DEPTH_ITEMS, default="SHADER", update=_struct)
-    inner: EnumProperty(name="Inner Material", items=INNER_ITEMS, default="CONCRETE", update=_struct)
+    inner: EnumProperty(name="Inner Material", items=INNER_ITEMS, default="CONCRETE", update=_damage_inner)
     depth_mm: FloatProperty(name="Depth (mm)", default=3.0, min=0.0, soft_max=30.0, update=_v("depth_mm"))
     rim_height: FloatProperty(name="Rim Height (mm)", default=0.6, min=0.0, soft_max=5.0, update=_v("rim_height"))
     rim_width: FloatProperty(name="Rim Width", default=0.25, min=0.01, max=1.0, update=_v("rim_width"))
     rim_brightness: FloatProperty(name="Rim Brightness", default=0.35, min=0.0, max=1.0, update=_v("rim_brightness"))
     sharpness: FloatProperty(name="Edge Sharpness", default=0.8, min=0.0, max=1.0, update=_v("sharpness"))
+    reveal: FloatProperty(name="Reveal", default=0.6, min=0.0, max=1.0, update=_v("reveal"),
+                          description="How much of a dent breaks through to the inner material")
     threshold: FloatProperty(name="Threshold", default=0.5, min=0.0, max=1.0, update=_v("threshold"),
                              description="Geometry mode: mask value above which cutters spawn")
     size_min: FloatProperty(name="Size Min", default=0.015, min=0.001, soft_max=0.5, subtype="DISTANCE",

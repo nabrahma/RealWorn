@@ -147,9 +147,17 @@ def group(name):
 
 
 def upgrade_open_file():
-    """Upgrade any RealWorn group already in the file to the current asset build."""
+    """Upgrade any RealWorn group already in the file to the current asset build, then recompile
+    every layered material: a stack wired against an older group interface would keep the old
+    wiring otherwise (compile() is deterministic, so this changes nothing when nothing changed)."""
     present = [n for n in naming.ALL_GROUPS if n in bpy.data.node_groups]
-    return ensure_groups(present) if present else 0
+    n = ensure_groups(present) if present else 0
+    if n:
+        from . import compiler
+        for mat in bpy.data.materials:
+            if mat.node_tree is not None and mat.realworn.applied and mat.realworn.stack is not None:
+                compiler.compile(mat)
+    return n
 
 
 def remove_unused_groups():

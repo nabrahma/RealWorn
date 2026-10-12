@@ -47,6 +47,53 @@ class RW_OT_pbrset_load(bpy.types.Operator):
 _classes = (RW_OT_pbrset_load,)
 
 
+class RW_OT_damage_apply(bpy.types.Operator):
+    """Make Geometry-mode damage permanent: the Boolean result is applied to the mesh (for export)"""
+    bl_idname = "realworn.damage_apply"
+    bl_label = "Apply Damage"
+    bl_options = {"REGISTER", "UNDO"}
+
+    object: StringProperty(name="Object", default="")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        from ..core import damage
+        ob = bpy.data.objects.get(self.object) if self.object else context.active_object
+        if ob is None or not damage.apply_geometry(ob):
+            self.report({"WARNING"}, "No Geometry-mode damage on this object")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Damage applied to {}".format(ob.name))
+        return {"FINISHED"}
+
+
+class RW_OT_damage_dirt(bpy.types.Operator):
+    """Add a Dirt layer above this Damage layer that collects in the breaks"""
+    bl_idname = "realworn.damage_dirt"
+    bl_label = "Dirt in Damage"
+    bl_options = {"REGISTER", "UNDO"}
+
+    object: StringProperty(name="Object", default="")
+    material: StringProperty(name="Material", default="")
+    layer: StringProperty(name="Layer ID", default="")
+
+    def execute(self, context):
+        from ..core import damage
+        ob, mat = resolve_material(context, self.object, self.material)
+        if mat is None or not injector.is_setup(mat) or not len(mat.realworn.layers):
+            return {"CANCELLED"}
+        ly = mat.realworn.layers[resolve_layer(mat, self.layer)]
+        if ly.type != "DAMAGE":
+            self.report({"WARNING"}, "Select a Damage layer")
+            return {"CANCELLED"}
+        damage.add_dirt_in_damage(mat, ly)
+        return {"FINISHED"}
+
+
+_classes = _classes + (RW_OT_damage_apply, RW_OT_damage_dirt)
+
+
 def register():
     for c in _classes:
         bpy.utils.register_class(c)

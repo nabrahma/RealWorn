@@ -164,12 +164,15 @@ def draw_content(layout, mat, layer):
         box.label(text="Damage", icon="MOD_BOOLEAN")
         box.prop(layer.damage, "depth_mode", expand=True)
         box.prop(layer.damage, "inner")
-        for p in ("depth_mm", "rim_height", "rim_width", "rim_brightness", "sharpness"):
+        for p in ("depth_mm", "reveal", "rim_height", "rim_width", "rim_brightness", "sharpness"):
             box.prop(layer.damage, p)
         if layer.damage.depth_mode == "GEOMETRY":
             for p in ("threshold", "size_min", "size_max", "density", "debris", "live"):
                 box.prop(layer.damage, p)
             opx(box, "realworn.damage_apply", icon="CHECKMARK")
+            if layer.damage.get("rw_warning"):
+                box.label(text=layer.damage["rw_warning"], icon="ERROR")
+        opx(box, "realworn.damage_dirt", icon="BRUSH_DATA")
     elif layer.type == "DECAL":
         box = layout.box()
         box.label(text="Decal", icon="IMAGE_DATA")

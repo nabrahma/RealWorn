@@ -237,6 +237,7 @@ def remove_object(obj, delete_images=True):
     rec = record(obj)
     from . import damage
     damage.remove_geometry(obj)
+    damage.remove_subdiv(obj)
     images = mask_images(obj) if delete_images else []
     for m in materials_of(obj):
         if injector.is_setup(m):

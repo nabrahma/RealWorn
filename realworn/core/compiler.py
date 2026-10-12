@@ -222,6 +222,7 @@ def build_mask(b, layer, masks, base_height, decal_alpha=None):
         P = b.outp(b.group(naming.SH_EDGE_LOCK, "lock", Mask=P, Lock=lock, Strength=layer.lock_strength))
     if layer.use_height_blend:
         P = b.outp(b.group(naming.SH_HEIGHT_BLEND, "hblend", Mask=P, Height=base_height, Amount=layer.height_blend))
+    b.raw_mask = P  # before Levels: damage dents use the soft falloff for their bowl shape
     P = b.outp(b.group(naming.SH_LEVELS, "levels", Mask=P, Threshold=layer.threshold, Softness=layer.softness))
     return b.mul(P, b.value_node("opacity", layer.opacity))
 
@@ -355,6 +356,9 @@ def compile(mat):
             if layer.type == "DECAL":
                 from . import decals
                 decals.apply_content(b, layer, mask, cur, ctx)
+            elif layer.type == "DAMAGE":
+                from . import damage
+                apply_content(b, layer, damage.content_mask(b, layer, mask, ctx), cur, ctx)
             else:
                 apply_content(b, layer, mask, cur, ctx)
             _special(b, layer, mask, cur, ctx)
@@ -389,10 +393,10 @@ def compile(mat):
 
 def after_compile(mat):
     """Keep things that live outside the group in step: generators (ING-1), displacement."""
-    from . import setup
+    from . import damage, injector, setup
     setup.sync_generators(mat)
-    from . import injector
     injector.sync_outputs(mat)
+    damage.sync(mat)
 
 
 # ---------------------------------------------------------------- callbacks

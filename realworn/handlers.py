@@ -5,6 +5,16 @@ from bpy.app.handlers import persistent
 
 
 @persistent
+def _on_load_post(*_args):
+    """Files saved with an older RealWorn get the current shared groups and recompiled stacks."""
+    from .core import assets
+    try:
+        assets.upgrade_open_file()
+    except Exception as ex:  # never block loading a file
+        print("[RealWorn] upgrade on load failed:", ex)
+
+
+@persistent
 def _on_save_pre(filepath, *_args):
     from .core import compiler, images, injector
     for mat in bpy.data.materials:  # Mask View is a viewing aid, never part of the saved file
@@ -30,13 +40,19 @@ def _on_save_post(*_args):
 @persistent
 def _on_depsgraph(scene, depsgraph):
     try:
-        from .core import decals
+        from .core import damage, decals, images
     except ImportError:
         return
     decals.on_depsgraph_update(scene, depsgraph)
+    for upd in depsgraph.updates:  # DMG-4: a stroke on a Geometry-mode Damage mask re-cuts
+        if isinstance(upd.id, bpy.types.Image):
+            img = bpy.data.images.get(upd.id.name)
+            if img is not None and images.is_rw_image(img):
+                damage.refresh_live(img)
 
 
 _HANDLERS = (
+    (bpy.app.handlers.load_post, _on_load_post),
     (bpy.app.handlers.save_pre, _on_save_pre),
     (bpy.app.handlers.save_post, _on_save_post),
     (bpy.app.handlers.depsgraph_update_post, _on_depsgraph),
