@@ -1,51 +1,14 @@
-"""Debug tools: Mask Preview, Validate Scene, Reload Add-on, Rebuild Assets."""
+"""Debug tools: Validate, Remove All, Reload Add-on, Rebuild Assets."""
 
 import bpy
-from bpy.props import EnumProperty, StringProperty
 
-from ..core import masks
-from ..props import PREVIEW_ITEMS
-from .common import OBJECTS_DESC, target_objects
-
-
-class RW_OT_mask_preview(bpy.types.Operator):
-    """Show one mask as greyscale on every weathered object (None restores)"""
-    bl_idname = "realworn.mask_preview"
-    bl_label = "Mask Preview"
-    bl_options = {"REGISTER", "UNDO"}
-
-    mode: EnumProperty(name="Mask", items=PREVIEW_ITEMS, default="EDGE")
-
-    def execute(self, context):
-        context.scene.realworn.mask_preview = self.mode  # update callback does the work
-        return {"FINISHED"}
-
-
-class RW_OT_add_masks(bpy.types.Operator):
-    """Add the RW_Masks modifier to the selected meshes (Apply does this too)"""
-    bl_idname = "realworn.add_masks"
-    bl_label = "Add Masks"
-    bl_options = {"REGISTER", "UNDO"}
-
-    objects: StringProperty(name="Objects", description=OBJECTS_DESC, default="")
-
-    def execute(self, context):
-        obs = target_objects(context, self.objects, meshes_only=False)
-        done = 0
-        for o in obs:
-            if not masks.is_supported(o):
-                self.report({"WARNING"}, "{}: not a mesh, skipped (convert it first)".format(o.name))
-                continue
-            masks.ensure_masks(o)
-            done += 1
-        self.report({"INFO"}, "Masks on {} object(s)".format(done))
-        return {"FINISHED"}
+from .common import report_all
 
 
 class RW_OT_validate(bpy.types.Operator):
-    """Report orphan nodes, missing attributes, schema mismatches and other RealWorn problems"""
+    """Report orphan nodes, missing images, unsaved masks, schema mismatches and other problems"""
     bl_idname = "realworn.validate"
-    bl_label = "Validate Scene"
+    bl_label = "Validate"
 
     def execute(self, context):
         from ..core import validate
@@ -53,6 +16,22 @@ class RW_OT_validate(bpy.types.Operator):
         for level, msg in issues:
             self.report({level}, msg)
         self.report({"INFO"}, "Validate: {} issue(s)".format(len(issues)) if issues else "Validate: all good")
+        return {"FINISHED"}
+
+
+class RW_OT_remove_all(bpy.types.Operator):
+    """Remove every trace of RealWorn from the file (materials restored exactly)"""
+    bl_idname = "realworn.remove_all"
+    bl_label = "Remove All RealWorn Data"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        from ..core import setup
+        report_all(self, setup.remove_all())
+        self.report({"INFO"}, "RealWorn removed from the file")
         return {"FINISHED"}
 
 
@@ -92,7 +71,7 @@ class RW_OT_reload(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_mask_preview, RW_OT_add_masks, RW_OT_validate, RW_OT_rebuild_assets, RW_OT_reload)
+_classes = (RW_OT_validate, RW_OT_remove_all, RW_OT_rebuild_assets, RW_OT_reload)
 
 
 def register():

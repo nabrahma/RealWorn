@@ -1,4 +1,5 @@
-"""Add, update and remove the RW_Masks modifier (MASK-1..MASK-5, MASK-9)."""
+"""Add, update and remove the RW_Masks modifier: the optional Edge / Cavity / Contact generators
+(v2 ING-1: added only while a layer uses one)."""
 
 import bpy
 
@@ -88,18 +89,6 @@ def place_modifier(obj, mod):
         obj.modifiers.move(cur, idx)
 
 
-def ensure_paint_attribute(mesh):
-    """Create the rw_paint corner byte-color attribute filled black; True if created."""
-    if naming.ATTR_PAINT in mesh.color_attributes:
-        return False
-    active = mesh.color_attributes.active_color_name
-    attr = mesh.color_attributes.new(naming.ATTR_PAINT, "BYTE_COLOR", "CORNER")
-    attr.data.foreach_set("color", [0.0, 0.0, 0.0, 1.0] * len(attr.data))
-    if active:  # do not steal the user's active/render color attribute
-        mesh.color_attributes.active_color_name = active
-    return True
-
-
 def ensure_masks(obj, settings=None):
     """Add (or update) the RW_Masks modifier on a mesh object and return it."""
     if not is_supported(obj):
@@ -119,9 +108,6 @@ def ensure_masks(obj, settings=None):
     for k, v in (settings or {}).items():
         set_input(mod, k, v)
     sync_collections(obj, mod)
-    if obj.data.users == 1 or naming.ATTR_PAINT not in obj.data.color_attributes:
-        if ensure_paint_attribute(obj.data):
-            obj.data["rw_created_paint"] = True
     return mod
 
 
@@ -140,16 +126,15 @@ def sync_collections(obj, mod=None):
     obj.update_tag()
 
 
-def mark_ground(obj, state=True):
+def mark_ground(obj, state=True, sync_prop=True):
     """Ground objects are what the Contact generator measures distance to (RW_Ground)."""
     coll = ensure_collection(naming.COLL_GROUND)
     if state and obj.name not in coll.objects:
         coll.objects.link(obj)
     elif not state and obj.name in coll.objects:
         coll.objects.unlink(obj)
-    obj.realworn.is_ground = state
-    if naming.OB_GROUND in naming.OBJECT_PROPS:
-        obj[naming.OB_GROUND] = 1.0 if state else 0.0
+    if sync_prop and obj.realworn.is_ground != state:
+        obj.realworn.is_ground = state  # its update callback calls back here with sync_prop=False
     for o in bpy.data.objects:
         if masks_modifier(o) is not None:
             sync_collections(o)
@@ -160,12 +145,6 @@ def remove_masks(obj):
     mod = masks_modifier(obj)
     if mod is not None:
         obj.modifiers.remove(mod)
-    me = obj.data
-    if me is not None and me.get("rw_created_paint"):
-        attr = me.color_attributes.get(naming.ATTR_PAINT)
-        if attr is not None:
-            me.color_attributes.remove(attr)
-        del me["rw_created_paint"]
 
 
 def large_ngon_count(mesh, limit=8):

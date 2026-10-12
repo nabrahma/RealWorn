@@ -1,4 +1,4 @@
-"""Application handlers: end Mask Preview on save, decal upkeep."""
+"""Application handlers: never lose paint on save (SAV-2), never save Mask View, decal upkeep."""
 
 import bpy
 from bpy.app.handlers import persistent
@@ -6,12 +6,21 @@ from bpy.app.handlers import persistent
 
 @persistent
 def _on_save_pre(_dummy):
-    """MASK-6: Mask Preview never gets saved into a file."""
-    from .core import preview
-    for scene in bpy.data.scenes:
-        if scene.realworn.mask_preview != "NONE":
-            scene.realworn.mask_preview = "NONE"
-    preview.restore_all()
+    from .core import images, injector
+    for mat in bpy.data.materials:  # Mask View is a viewing aid, never part of the saved look
+        if mat.node_tree is not None and mat.realworn.applied and mat.realworn.mask_view:
+            injector.set_mask_view(mat, False)
+            mat["rw_restore_mask_view"] = True
+    images.save_all()
+
+
+@persistent
+def _on_save_post(_dummy):
+    from .core import injector
+    for mat in bpy.data.materials:
+        if mat.get("rw_restore_mask_view"):
+            del mat["rw_restore_mask_view"]
+            injector.set_mask_view(mat, True)
 
 
 @persistent
@@ -20,12 +29,12 @@ def _on_depsgraph(scene, depsgraph):
         from .core import decals
     except ImportError:
         return
-    if hasattr(decals, "on_depsgraph_update"):
-        decals.on_depsgraph_update(scene, depsgraph)
+    decals.on_depsgraph_update(scene, depsgraph)
 
 
 _HANDLERS = (
     (bpy.app.handlers.save_pre, _on_save_pre),
+    (bpy.app.handlers.save_post, _on_save_post),
     (bpy.app.handlers.depsgraph_update_post, _on_depsgraph),
 )
 

@@ -2,8 +2,8 @@ import bpy
 
 
 def test_addon_registers_sidebar_panel(empty_scene):
-    assert hasattr(bpy.types, "RW_PT_object")
-    assert bpy.types.RW_PT_object.bl_category == "RealWorn"
+    assert hasattr(bpy.types, "RW_PT_main")
+    assert bpy.types.RW_PT_main.bl_category == "RealWorn"
 
 
 def test_blender_version_is_supported():

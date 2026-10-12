@@ -1,25 +1,21 @@
-"""Projector decals (DEC-1..DEC-10). (Auto Leaks was removed in v2 P0.)
+"""Projector decals as layers (DEC-1..DEC-6).
 
-A decal is an Empty (cube display) named RW_Decal_<image>. Every material of every object
-inside its box gets an RW_L_Decal layer that projects through Texture Coordinate > Object of
-that Empty. Each material keeps the list of its decals (`material.realworn.decals`, JSON) and
-its decal chain is rebuilt from that list, so the order is stable and removal is exact.
+A decal is an Empty (cube display) named RW_Decal_<image> in the RW_Decals collection plus a
+Decal layer on each layered material of the object it was placed on. The layer projects the
+image through Texture Coordinate > Object of that Empty, with a facing fade so side faces never
+stretch, and has a paintable mask like any other layer (tear a poster, fade a stain). Layer
+order decides what covers it: Dirt and Water above a decal make it dirty and wet (DEC-4).
 """
 
-import json
 import os
 
 import bpy
 from mathutils import Matrix, Vector
 
-from . import assets, injector, naming, nodeutil, weathering
+from . import assets, naming
 
 DECAL_DIR = os.path.join(assets.ASSET_DIR, "decals")
-MODES = {"FULL": 0.0, "GRIME": 1.0, "DAMAGE": 2.0}
-_ACC_TO_STACK = (("Color", "Decal Color"), ("Alpha", "Decal Alpha"), ("Roughness", "Decal Roughness"),
-                 ("Rough Alpha", "Decal Rough Alpha"), ("Darken", "Decal Darken"), ("Damage", "Decal Damage"),
-                 ("Height", "Decal Height"), ("Normal", "Decal Normal"), ("Normal Alpha", "Decal Normal Alpha"))
-_ACC_NAMES = [a for a, _ in _ACC_TO_STACK]
+MODES = ("FULL", "GRIME", "DAMAGE")
 
 
 class DecalError(Exception):
@@ -165,11 +161,14 @@ def orientation(normal, rotation=0.0, up=(0.0, 0.0, 1.0)):
     return m @ Matrix.Rotation(rotation, 3, "Z")
 
 
-def place(scene, image, location, normal, size=0.6, mode="FULL", rotation=0.0, height=None, depth=None,
-          opacity=1.0, targets=None):
-    """Create a projector decal at a surface point. Returns (empty, report list)."""
+def place(obj, image, location, normal, size=0.6, mode="FULL", rotation=0.0, height=None, depth=None,
+          scene=None):
+    """DEC-1: Empty at a surface point plus a Decal layer on every layered material of `obj`.
+    Returns (empty, [layers], report list)."""
+    from . import layers, setup
     if mode not in MODES:
-        raise DecalError("mode must be one of {}".format(sorted(MODES)))
+        raise DecalError("mode must be one of {}".format(MODES))
+    scene = scene or bpy.context.scene
     img = load_image(image)
     w, h = img.size
     height = height if height is not None else size * (h / w if w else 1.0)
@@ -182,203 +181,134 @@ def place(scene, image, location, normal, size=0.6, mode="FULL", rotation=0.0, h
         (size / 2.0, height / 2.0, depth / 2.0))).to_4x4()
     ensure_collection(scene).objects.link(empty)
     empty["rw_decal"] = True
-    empty["rw_decal_image"] = img.name
-    empty["rw_decal_mode"] = mode
-    empty["rw_opacity"] = float(opacity)
-    nrm = _normal_map_for(_path_for(image))
-    if nrm:
-        empty["rw_decal_normal"] = load_image(nrm, non_color=True).name
-    bpy.context.view_layer.update() if bpy.context.view_layer else None
-    rep = []
-    targets = targets if targets is not None else intersecting_objects(empty, scene)
-    names = []
-    for ob in targets:
-        if not ob.realworn.applied:
-            rep += weathering.apply_object(ob, scene, scene.realworn.preset)
-        for mat in weathering.materials_of(ob):
-            if not injector.is_applied(mat):
-                continue
-            if add_to_material(mat, empty):
-                names.append(mat.name)
-            else:
-                rep.append(("WARNING", "{}: {} decals already; bake it to add more".format(
-                    mat.name, naming.MAX_DECALS_PER_MATERIAL)))
-    empty["rw_targets"] = sorted(set(names))
-    shared = sorted({o.name for m in names for o in weathering.users_of(bpy.data.materials[m])} -
-                    {o.name for o in targets})
-    if shared:
-        rep.append(("INFO", "Shared material: also used by {} (unaffected outside the decal box)".format(
-            ", ".join(shared[:5]))))
-    if not names:
-        rep.append(("WARNING", "Decal placed but it touches no weathered material"))
-    return empty, rep
+    nrm_path = _normal_map_for(_path_for(image))
+    nrm = load_image(nrm_path, non_color=True) if nrm_path else None
+    rep, made = [], []
+    if not setup.is_setup(obj):
+        rep += setup.setup_object(obj)
+    for mat in setup.layered_materials(obj):
+        if sum(1 for ly in mat.realworn.layers if ly.type == "DECAL") >= naming.MAX_DECALS_PER_MATERIAL:
+            rep.append(("WARNING", "{}: {} decal layers already; bake one into a layer first".format(
+                mat.name, naming.MAX_DECALS_PER_MATERIAL)))
+            continue
+        from . import compiler
+        with compiler.batch(mat):
+            ly = layers.add_layer(mat, "DECAL", name=os.path.splitext(img.name)[0].replace("_", " ").title(),
+                                  index=len(mat.realworn.layers))
+            ly.decal.empty = empty
+            ly.decal.image = img
+            ly.decal.normal_image = nrm
+            ly.decal.mode = mode
+            if mode == "GRIME":  # DEC-3: channel-only
+                ly.color.enabled = False
+                ly.metallic.enabled = False
+        compiler.compile(mat)
+        made.append(ly)
+    empty["rw_targets"] = [m.name for m in setup.layered_materials(obj)]
+    if not made:
+        rep.append(("WARNING", "Decal placed but no layer was added"))
+    return empty, made, rep
 
 
-# -------------------------------------------------------- material chains
-def material_decals(mat):
-    try:
-        return list(json.loads(mat.realworn.decals or "[]"))
-    except ValueError:
-        return []
-
-
-def _set_list(mat, names):
-    mat.realworn.decals = json.dumps(names)
-
-
-def add_to_material(mat, empty):
-    names = material_decals(mat)
-    if empty.name in names:
-        return True
-    if len(names) >= naming.MAX_DECALS_PER_MATERIAL:
-        return False
-    names.append(empty.name)
-    _set_list(mat, names)
-    rebuild_material(mat)
-    return True
-
-
-def remove_from_material(mat, name):
-    names = material_decals(mat)
-    if name in names:
-        names.remove(name)
-        _set_list(mat, names)
-        rebuild_material(mat)
-
-
-def _decal_nodes(tree):
-    return [n for n in tree.nodes if nodeutil.is_owned(n) and n.name.startswith(naming.node_name("decal"))]
-
-
-def rebuild_material(mat):
-    """Rebuild the decal chain of one material from its decal list (dropping deleted Empties)."""
-    tree = mat.node_tree
-    for n in _decal_nodes(tree):
-        tree.nodes.remove(n)
-    stacks = injector.stacks(tree)
-    names = [n for n in material_decals(mat) if is_decal(bpy.data.objects.get(n))]
-    _set_list(mat, names)
-    if not stacks or not names:
-        return 0
-    assets.ensure_groups((naming.SH_DECAL, naming.SH_DECAL_PROJECT))
-    frame = nodeutil.ensure_frame(tree)
-    sx, sy = injector._abs(stacks[0])
-    prev = None
-    for k, name in enumerate(names):
-        e = bpy.data.objects[name]
-        x, y = sx - 1100 + 0 * k, sy - 500 - 260 * k
-        tc = nodeutil.new(tree, "ShaderNodeTexCoord", "decal_tc.{}".format(k), frame=frame)
-        tc.object = e
-        pj = nodeutil.new(tree, "ShaderNodeGroup", "decal_proj.{}".format(k), frame=frame)
-        pj.node_tree = bpy.data.node_groups[naming.SH_DECAL_PROJECT]
-        im = nodeutil.new(tree, "ShaderNodeTexImage", "decal_img.{}".format(k), frame=frame)
-        im.image = bpy.data.images.get(e.get("rw_decal_image", ""))
-        im.extension = "CLIP"
-        ly = nodeutil.new(tree, "ShaderNodeGroup", "decal.{}".format(k), frame=frame)
-        ly.node_tree = bpy.data.node_groups[naming.SH_DECAL]
-        ly["rw_decal"] = name
-        for node, dx in ((tc, 0), (pj, 200), (im, 400), (ly, 700)):
-            node.hide = node is not ly
-            injector._place(node, x + dx, y)
-        tree.links.new(tc.outputs["Object"], pj.inputs["Vector"])
-        tree.links.new(pj.outputs["UV"], im.inputs["Vector"])
-        tree.links.new(im.outputs["Color"], ly.inputs["Image Color"])
-        tree.links.new(im.outputs["Alpha"], ly.inputs["Image Alpha"])
-        tree.links.new(pj.outputs["Box"], ly.inputs["Box"])
-        ly.inputs["Projection Normal"].default_value = projection_normal(e)
-        ly.inputs["Mode"].default_value = MODES.get(e.get("rw_decal_mode", "FULL"), 0.0)
-        ly.inputs["Opacity"].default_value = float(e.get("rw_opacity", 1.0))
-        nimg = bpy.data.images.get(e.get("rw_decal_normal", ""))
-        if nimg is not None:
-            nm = nodeutil.new(tree, "ShaderNodeTexImage", "decal_nrm.{}".format(k), frame=frame)
-            nm.image = nimg
-            nm.extension = "CLIP"
-            nm.hide = True
-            injector._place(nm, x + 400, y - 60)
-            tree.links.new(pj.outputs["UV"], nm.inputs["Vector"])
-            tree.links.new(nm.outputs["Color"], ly.inputs["Normal Map"])
-            ly.inputs["Has Normal"].default_value = 1.0
-        if prev is not None:
-            for a in _ACC_NAMES:
-                tree.links.new(prev.outputs[a], ly.inputs[a])
-        prev = ly
-    for st in stacks:
-        for a, s in _ACC_TO_STACK:
-            tree.links.new(prev.outputs[a], st.inputs[s])
-    return len(names)
-
-
-def update_projection(empty):
-    """Keep the facing fade aligned when a decal Empty is rotated (DEC-3)."""
+def update_normal(empty):
+    """Keep the facing fade aligned when a decal Empty is rotated (value-only, no recompile)."""
     n = projection_normal(empty)
     for mat in bpy.data.materials:
-        if mat.node_tree is None or empty.name not in material_decals(mat):
+        g = mat.realworn.stack if mat.realworn.applied else None
+        if g is None:
             continue
-        for node in _decal_nodes(mat.node_tree):
-            if node.get("rw_decal") == empty.name:
-                cur = Vector(node.inputs["Projection Normal"].default_value)
-                if (cur - n).length > 1e-5:
-                    node.inputs["Projection Normal"].default_value = n
+        for ly in mat.realworn.layers:
+            if ly.type == "DECAL" and ly.decal.empty == empty:
+                node = g.nodes.get(naming.layer_node(ly.id, "decal.normal"))
+                if node is not None:
+                    cur = Vector([node.inputs[a].default_value for a in "XYZ"])
+                    if (cur - n).length > 1e-5:
+                        for i, a in enumerate("XYZ"):
+                            node.inputs[a].default_value = n[i]
 
 
-def cleanup(scene=None, retarget=False):
-    """Clean Up Decals (DEC-10): drop layers of deleted Empties; optionally re-target moved ones."""
-    changed = 0
-    for mat in bpy.data.materials:
-        if mat.node_tree is None or not injector.is_applied(mat):
-            continue
-        names = material_decals(mat)
-        alive = [n for n in names if is_decal(bpy.data.objects.get(n))]
-        if alive != names or len(_decal_nodes(mat.node_tree)) != _expected_nodes(mat, alive):
-            _set_list(mat, alive)
-            rebuild_material(mat)
-            changed += 1
-    if retarget and scene is not None:
-        for vl in scene.view_layers:  # moved Empties: refresh matrix_world before testing bounds
-            vl.update()
-        for e in decal_objects():
-            want = {m.name for o in intersecting_objects(e, scene) for m in weathering.materials_of(o)
-                    if injector.is_applied(m)}
-            for mat in bpy.data.materials:
-                has = e.name in material_decals(mat)
-                if has and mat.name not in want:
-                    remove_from_material(mat, e.name)
-                    changed += 1
-                elif not has and mat.name in want:
-                    changed += add_to_material(mat, e)
-            e["rw_targets"] = sorted(want)
-    return changed
-
-
-def _expected_nodes(mat, names):
-    n = 0
-    for name in names:
-        e = bpy.data.objects.get(name)
-        n += 4 + (1 if e is not None and bpy.data.images.get(e.get("rw_decal_normal", "")) else 0)
-    return n
+def decal_layers(mat):
+    return [ly for ly in mat.realworn.layers if ly.type == "DECAL"]
 
 
 def delete_decal(empty):
-    name = empty.name
+    """Delete the Empty and every Decal layer projecting through it."""
+    from . import compiler
+    for mat in bpy.data.materials:
+        if not mat.realworn.applied:
+            continue
+        idx = [i for i, ly in enumerate(mat.realworn.layers) if ly.type == "DECAL" and ly.decal.empty == empty]
+        if idx:
+            with compiler.batch(mat):
+                for i in reversed(idx):
+                    mat.realworn.layers.remove(i)
+                mat.realworn.active_layer_index = max(0, min(mat.realworn.active_layer_index,
+                                                             len(mat.realworn.layers) - 1))
+            compiler.compile(mat)
     bpy.data.objects.remove(empty)
-    for mat in bpy.data.materials:
-        if mat.node_tree is not None and name in material_decals(mat):
-            remove_from_material(mat, name)
 
 
-def remove_all_decals():
-    n = 0
-    for e in decal_objects():
-        bpy.data.objects.remove(e)
-        n += 1
-    for mat in bpy.data.materials:
-        if mat.node_tree is not None and material_decals(mat):
-            _set_list(mat, [])
-            rebuild_material(mat)
-    coll = bpy.data.collections.get(naming.COLL_DECALS)
-    if coll is not None:
-        bpy.data.collections.remove(coll)
-    return n
+# ----------------------------------------------------------- compiler side
+def build_projection(b, layer, cur, ctx):
+    """Projected image alpha * box * facing fade: the decal layer's procedural mask part."""
+    d = layer.decal
+    if d.empty is None or d.image is None:
+        return None
+    assets.ensure_groups((naming.SH_DECAL_PROJECT,))
+    tc = b.named("ShaderNodeTexCoord", "decal.tc")
+    tc.object = d.empty
+    pj = b.group(naming.SH_DECAL_PROJECT, "decal.project")
+    b.links.new(tc.outputs["Object"], pj.inputs["Vector"])
+    im = b.named("ShaderNodeTexImage", "decal.img")
+    im.image = d.image
+    im.extension = "CLIP"
+    b.links.new(pj.outputs["UV"], im.inputs["Vector"])
+    nvec = b.named("ShaderNodeCombineXYZ", "decal.normal")  # world direction the decal faces
+    n = projection_normal(d.empty)
+    for i, axis in enumerate("XYZ"):
+        nvec.inputs[axis].default_value = n[i]
+    geo = b.named("ShaderNodeNewGeometry", "decal.geo")
+    facing = b.vmath("DOT_PRODUCT", geo.outputs["Normal"], nvec.outputs[0])
+    fade = b.smooth(facing, 0.45, 0.6)
+    ctx["decal_color"] = im.outputs["Color"]
+    ctx["decal_image_node"] = im
+    ctx["decal_uv"] = pj.outputs["UV"]
+    return b.clamp(b.mul_all(im.outputs["Alpha"], pj.outputs["Box"], fade))
+
+
+def apply_content(b, layer, mask, cur, ctx):
+    """FULL: image colour + roughness (+ normal map); GRIME: darken + roughness only (DEC-3);
+    DAMAGE: darken and dent."""
+    d = layer.decal
+    col = ctx.pop("decal_color", None)
+    if col is None:
+        return
+    darken = b.value_node("decal.darken", d.darken)
+    lum = b.lum(col)
+    if d.mode == "FULL" and layer.color.enabled:
+        cur["Base Color"] = b.mix(mask, cur["Base Color"], col)
+    else:  # grime / damage: darken by the image's darkness
+        k = b.inv(b.mul_all(mask, b.inv(lum), darken))
+        cur["Base Color"] = b.mix(1.0, cur["Base Color"], b.comb(k, k, k), blend="MULTIPLY")
+    if layer.roughness.enabled:
+        rv = b.value_node("roughness.value", layer.roughness.value)
+        cur["Roughness"] = b.mixf(mask, cur["Roughness"], rv)
+    if layer.metallic.enabled and d.mode == "FULL":
+        mv = b.value_node("metallic.value", layer.metallic.value)
+        cur["Metallic"] = b.mixf(mask, cur["Metallic"], mv)
+    if d.mode == "DAMAGE":
+        if cur["Height"] is None:
+            cur["Height"] = b.value_node("h0", 0.0)
+        cur["Height"] = b.sub(cur["Height"], b.mul_all(mask, b.inv(lum), 2.0))
+        ctx["height_used"] = True
+    if d.normal_image is not None and d.mode == "FULL":
+        nm_img = b.named("ShaderNodeTexImage", "decal.nrm")
+        nm_img.image = d.normal_image
+        nm_img.extension = "CLIP"
+        b.links.new(ctx["decal_uv"], nm_img.inputs["Vector"])
+        nmap = b.named("ShaderNodeNormalMap", "decal.nmap")
+        b.links.new(nm_img.outputs["Color"], nmap.inputs["Color"])
+        cur["Normal"] = b.mixv(mask, cur["Normal"], nmap.outputs["Normal"])
 
 
 # ------------------------------------------------------- depsgraph upkeep
@@ -386,17 +316,21 @@ _state = {"objects": -1}
 
 
 def on_depsgraph_update(scene, depsgraph):
-    """DEC-10 and DEC-3 upkeep: cheap unless an Empty moved or objects were deleted."""
+    """Rotated Empties update their facing normal; deleted Empties drop their layers' nodes."""
+    from . import compiler
     n = len(bpy.data.objects)
     if n < _state["objects"]:
-        cleanup()
+        for mat in bpy.data.materials:
+            if mat.realworn.applied and any(ly.type == "DECAL" and ly.decal.empty is None
+                                            for ly in mat.realworn.layers):
+                g = mat.realworn.stack
+                if g is not None and any(nd.name.endswith("::decal.tc") and nd.object is None for nd in g.nodes
+                                         if nd.bl_idname == "ShaderNodeTexCoord"):
+                    compiler.compile(mat)
     _state["objects"] = n
     for upd in depsgraph.updates:
         idb = upd.id
         if isinstance(idb, bpy.types.Object) and upd.is_updated_transform and idb.get("rw_decal"):
             ob = bpy.data.objects.get(idb.name)
             if ob is not None:
-                update_projection(ob)
-
-
-# ------------------------------------------------------------- auto leaks
+                update_normal(ob)

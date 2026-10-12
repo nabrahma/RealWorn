@@ -1,13 +1,14 @@
-"""Geometry damage (W7, DMG-1..DMG-9): add / update / remove the RW_Damage modifier.
+"""Damage (DMG-1..DMG-9).
 
-Non-destructive: everything happens in a Geometry Nodes modifier placed before RW_Masks, so
-chips get edge wear, dust and wetness like any other surface. Remove deletes the modifier.
+v2 P1 state: the v0.7 RW_Damage modifier helpers (seed/strength cutters) are kept for P6, which
+makes damage a painted layer (Shader, Displacement and Geometry depth). The compiler hooks
+apply_shader / on_value / value_targets are no-ops until then.
 """
 
 import bmesh
 import bpy
 
-from . import assets, injector, masks, naming
+from . import assets, masks, naming
 
 # preset -> inner material kind; kind -> (base color, metallic, roughness)
 INNER_KIND = {"painted_metal": "steel", "bare_metal": "steel", "concrete": "concrete", "wood": "wood",
@@ -46,17 +47,8 @@ def manifold_problem(obj):
         bm.free()
 
 
-def inner_kind(obj):
-    preset = obj.realworn.preset or "AUTO"
-    if preset == "AUTO":
-        mats = [s.material for s in obj.material_slots if s.material is not None]
-        preset = mats[0].realworn.preset if mats and mats[0].realworn.preset else "concrete"
-    return INNER_KIND.get(preset, "concrete")
-
-
 def inner_material(kind):
-    """RW_Inner_<kind>: raw concrete, bare steel, light raw wood or whitened plastic, itself
-    weathered with dust and cavity dirt (DMG-5)."""
+    """RW_Inner_<kind>: raw concrete, bare steel, light raw wood or whitened plastic."""
     name = naming.inner_material_name(kind)
     mat = bpy.data.materials.get(name)
     if mat is None:
@@ -66,8 +58,6 @@ def inner_material(kind):
         bsdf.inputs["Base Color"].default_value = (*col, 1.0)
         bsdf.inputs["Metallic"].default_value = metal
         bsdf.inputs["Roughness"].default_value = rough
-    if not injector.is_applied(mat):
-        injector.apply(mat, "inner")
     return mat
 
 
@@ -89,19 +79,12 @@ def add_damage(obj, scene=None, settings=None):
     masks.place_modifier(obj, mod)
     if masks.masks_modifier(obj) is not None:
         masks.place_modifier(obj, masks.masks_modifier(obj))
-    masks.set_input(mod, "Inner Material", inner_material(inner_kind(obj)))
+    masks.set_input(mod, "Inner Material", inner_material((settings or {}).pop("inner", "concrete")))
     ground = masks.ensure_collection(naming.COLL_GROUND)
     masks.set_input(mod, "Ground", None if obj.name in ground.objects else ground)  # no self-cycle
     for k, v in (settings or {}).items():
         masks.set_input(mod, k, v)
     return mod
-
-
-def settings_from_scene(scene):
-    p = scene.realworn
-    return {"Strength": p.dmg_strength, "Seed": p.dmg_seed, "Size Min": p.dmg_size_min,
-            "Size Max": max(p.dmg_size_max, p.dmg_size_min), "Density": p.dmg_density,
-            "Corners": p.dmg_corners, "Debris": p.dmg_debris}
 
 
 def set_show_viewport(obj, state):
@@ -117,3 +100,19 @@ def remove_damage(obj):
         obj.modifiers.remove(mod)
         return True
     return False
+
+
+remove_geometry = remove_damage
+
+
+# ------------------------------------------------------- compiler hooks (P6)
+def apply_shader(b, layer, mask, cur, ctx):
+    return None
+
+
+def on_value(mat, layer, prop):
+    return None
+
+
+def value_targets(layer, prop):
+    return []

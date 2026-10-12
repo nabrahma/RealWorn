@@ -6,7 +6,7 @@ import bpy
 import pytest
 
 from fixtures import make_scenes as ms
-from realworn.core import masks, naming, preview
+from realworn.core import masks, naming
 
 EPS = 1e-4
 
@@ -125,11 +125,11 @@ def test_modifier_order_keeps_subsurf_last(empty_scene):
 
 def test_remove_masks_restores_mesh(empty_scene):
     ob = ms.sharp_cube(empty_scene, cuts=2)
+    n_attr = len(ob.data.attributes)
     masks.ensure_masks(ob)
-    assert naming.ATTR_PAINT in ob.data.color_attributes
     masks.remove_masks(ob)
     assert not ob.modifiers
-    assert naming.ATTR_PAINT not in ob.data.color_attributes
+    assert len(ob.data.attributes) == n_attr  # generators never write into the original mesh
 
 
 def test_contact(empty_scene):
@@ -150,23 +150,6 @@ def test_non_mesh_rejected(empty_scene):
     assert not masks.is_supported(cu)
     with pytest.raises(TypeError):
         masks.ensure_masks(cu)
-
-
-def test_mask_preview_roundtrip(empty_scene):
-    mat = ms.principled("PreviewMat")
-    ob = ms.sharp_cube(empty_scene, cuts=4, material=mat)
-    masks.ensure_masks(ob)
-    out = mat.node_tree.nodes["Material Output"]
-    before = out.inputs["Surface"].links[0].from_node.name
-    n_nodes = len(mat.node_tree.nodes)
-    preview.set_preview(empty_scene, "EDGE")
-    assert out.inputs["Surface"].links[0].from_node.name == "RW::preview"
-    assert empty_scene[naming.SC_PREVIEW] == 1.0
-    preview.set_preview(empty_scene, "CAVITY")
-    assert mat.node_tree.nodes["RW::preview_attr"].attribute_name == naming.ATTR_CAVITY
-    preview.set_preview(empty_scene, "NONE")
-    assert out.inputs["Surface"].links[0].from_node.name == before
-    assert len(mat.node_tree.nodes) == n_nodes
 
 
 def test_masks_performance_100k(empty_scene):

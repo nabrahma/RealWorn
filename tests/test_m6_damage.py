@@ -8,7 +8,7 @@ import pytest
 
 from fixtures import make_scenes as ms
 from perf_log import record
-from realworn.core import damage, masks, naming, weathering
+from realworn.core import damage, masks, naming
 
 
 def _evaluated(ob, depsgraph=None):
@@ -35,8 +35,8 @@ def setup(empty_scene):
     floor = ms.street(sc)
     box = ms.sharp_cube(sc, name="Block", size=1.0, cuts=6, location=(0, 0, 0.6),
                         material=ms.principled("BlockMat", (0.55, 0.53, 0.5), roughness=0.85))
-    weathering.apply_object(floor, sc, "concrete")
-    weathering.apply_object(box, sc, "concrete")
+    masks.ensure_masks(floor)
+    masks.ensure_masks(box)
     masks.mark_ground(floor)
     return sc, floor, box
 
@@ -63,7 +63,7 @@ def test_chips_inner_material_and_rw_damage(setup):
     print("[damage] mean rw_edge on break rims {:.3f}".format(sum(rim) / len(rim)))
     assert sum(rim) / len(rim) > 0.3
     inner = masks.get_input(mod, "Inner Material")
-    assert inner.name == naming.inner_material_name("concrete") and inner.realworn.applied
+    assert inner.name == naming.inner_material_name("concrete")
 
 
 def test_non_destructive_and_removable(setup):
@@ -129,5 +129,5 @@ def test_viewport_toggle(setup):
     mod = damage.add_damage(box, sc, {"Strength": 0.7})
     damage.set_show_viewport(box, False)
     assert mod.show_viewport is False and mod.show_render is True
-    weathering.remove_object(box, sc)  # Remove on the object also removes its damage
+    damage.remove_damage(box)
     assert naming.MOD_DAMAGE not in box.modifiers

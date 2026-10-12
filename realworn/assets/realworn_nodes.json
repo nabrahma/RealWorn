@@ -1,21 +1,16 @@
 {
- "schema": 1,
- "build": "9a619db6406a",
+ "schema": 2,
+ "build": "3a89dd6feb1c",
  "groups": [
-  "RW_BevelEdge",
-  "RW_Breakup",
   "RW_Damage",
   "RW_DecalProject",
-  "RW_L_CavityDirt",
-  "RW_L_Decal",
-  "RW_L_DecalApply",
-  "RW_L_Dust",
-  "RW_L_EdgeWear",
-  "RW_L_Grime",
-  "RW_L_Rust",
   "RW_Masks",
-  "RW_RayCavity",
-  "RW_ShadingMasks",
-  "RW_Stack"
+  "RW_P_Contrast",
+  "RW_P_EdgeLock",
+  "RW_P_HeightBlend",
+  "RW_P_Levels",
+  "RW_P_PaintOver",
+  "RW_P_Up",
+  "RW_P_Variation"
  ]
 }

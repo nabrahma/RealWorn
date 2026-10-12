@@ -1,21 +1,26 @@
-"""Material injector: rewire a material through RW_Stack, and remove it exactly.
+"""Material injector (SET-2, SET-5, SET-6, REM-1): wrap a material's base and restore it exactly.
 
-Algorithm (PRD "Injection algorithm"):
-1 snapshot the tree; 2 walk upstream from the active output's Surface through Mix/Add
-Shader, reroutes and group nodes (groups are opaque, never edited) collecting Principled
-BSDFs; 3 channel mode (one RW_Stack per Principled) or shader mode (Mix Shader overlay)
-when there is none; 4-6 move each channel's incoming link (or copy its default) into the
-stack and link the stack back out; 7 tag every inserted node (RW::<role>, rw_owned) in a
-"RealWorn" frame; 8 Remove deletes owned nodes and restores links/defaults from the
-snapshot, then asserts the tree equals the snapshot.
+Only this module touches a material's top-level node tree (the compiler owns the inside of
+RW_Stack::<material>).
+
+Setup: snapshot the tree; find the Principled BSDF(s) feeding the active output (through Mix /
+Add Shader, reroutes and groups, which are never edited); per Principled insert one group node
+RW::stack.<i> instancing RW_Stack::<material> between the captured channels and the Principled
+inputs. Height is captured from a Displacement node, a Bump node, or an image named height /
+disp / displacement. Materials without a Principled BSDF get a Principled overlay mixed in by the
+stack's Coverage output (SHADER mode). Remove deletes every owned node and restores links,
+defaults and layout from the snapshot, then checks the tree equals it.
 """
+
+import json
 
 import bpy
 
-from . import assets, naming, nodeutil, presets, snapshot
+from . import naming, nodeutil, snapshot
 
 STACK_ROLE = "stack"
 _PASS_THROUGH = {"ShaderNodeMixShader", "ShaderNodeAddShader", "NodeReroute", "ShaderNodeGroup"}
+_HEIGHT_WORDS = ("height", "disp", "displacement")
 
 
 class InjectError(Exception):
@@ -55,7 +60,7 @@ def stacks(tree):
             and n.bl_idname == "ShaderNodeGroup"]
 
 
-def is_applied(mat):
+def is_setup(mat):
     return bool(mat is not None and mat.node_tree is not None and mat.realworn.applied)
 
 
@@ -80,8 +85,9 @@ def _abs(node):
     return loc.x, loc.y
 
 
-def _height_source(tree, principled, out):
-    """WX-3: the material's own height texture, if it has one (displacement or bump)."""
+def height_source(tree, principled, out):
+    """SET-5: Displacement node height, else a Bump node's height, else an image named like a
+    height map, else None (the stack then uses 0.5, i.e. flat)."""
     disp = nodeutil.link_source(out.inputs["Displacement"])
     if disp is not None and disp.node.bl_idname == "ShaderNodeDisplacement":
         h = nodeutil.link_source(disp.node.inputs["Height"])
@@ -93,19 +99,18 @@ def _height_source(tree, principled, out):
             h = nodeutil.link_source(n.node.inputs["Height"])
             if h is not None:
                 return h
+    for n in tree.nodes:
+        if n.bl_idname == "ShaderNodeTexImage" and n.image is not None and not nodeutil.is_owned(n):
+            stem = n.image.name.lower()
+            if any(w in stem for w in _HEIGHT_WORDS):
+                return n.outputs["Color"]
     return None
 
 
-def _set(sock, value):
-    if sock.type == "RGBA" and len(value) == 3:
-        value = (*value, 1.0)
-    sock.default_value = value
-
-
-def _new_stack(tree, idx, frame, x, y):
+def _new_stack(tree, mat, idx, frame, x, y):
     stack = nodeutil.new(tree, "ShaderNodeGroup", "{}.{}".format(STACK_ROLE, idx), frame=frame)
-    stack.node_tree = bpy.data.node_groups[naming.SH_STACK]
-    stack.label = "RealWorn Stack"
+    stack.node_tree = mat.realworn.stack
+    stack.label = "RealWorn Layers"
     stack.width = 240
     _place(stack, x, y)
     geom = nodeutil.new(tree, "ShaderNodeNewGeometry", "geom.{}".format(idx), frame=frame)
@@ -114,9 +119,9 @@ def _new_stack(tree, idx, frame, x, y):
     return stack, geom
 
 
-def _inject_channel(tree, principled, idx, frame, out):
+def _inject_channel(tree, mat, principled, idx, frame, out):
     px, py = _abs(principled)
-    stack, geom = _new_stack(tree, idx, frame, px - 320, py)
+    stack, geom = _new_stack(tree, mat, idx, frame, px - 320, py)
     stack["rw_principled"] = principled.name  # Bake swaps and Restore Live Stack relink by this
     for ch in naming.CHANNELS:
         pin, sin = principled.inputs[ch], stack.inputs[ch]
@@ -128,18 +133,17 @@ def _inject_channel(tree, principled, idx, frame, out):
         else:
             sin.default_value = pin.default_value
         tree.links.new(stack.outputs[ch], pin)
-    hs = _height_source(tree, principled, out)
+    hs = height_source(tree, principled, out)
     if hs is not None:
-        tree.links.new(hs, stack.inputs["Surface Height"])
-        stack.inputs["Has Surface Height"].default_value = 1.0
+        tree.links.new(hs, stack.inputs["Height"])
     return stack
 
 
-def _inject_shader(tree, out, frame):
-    """No Principled BSDF: mix the original shader with a weathered Principled by coverage."""
+def _inject_shader(tree, mat, out, frame):
+    """No Principled BSDF: mix the original shader with a layered Principled by coverage."""
     ox, oy = _abs(out)
     src = nodeutil.link_source(out.inputs["Surface"])
-    stack, geom = _new_stack(tree, 0, frame, ox - 700, oy - 260)
+    stack, geom = _new_stack(tree, mat, 0, frame, ox - 700, oy - 260)
     bsdf = nodeutil.new(tree, "ShaderNodeBsdfPrincipled", "overlay_bsdf", frame=frame)
     stack["rw_principled"] = bsdf.name
     _place(bsdf, ox - 420, oy - 260)
@@ -160,148 +164,148 @@ def _inject_shader(tree, out, frame):
     return stack
 
 
-# ----------------------------------------------------------------- presets
-def resolve_preset(mat, preset_id, obj_name=""):
-    if preset_id and preset_id != "AUTO":
-        return preset_id
-    _, princ = find_principled(mat.node_tree)
-    if princ:
-        metal = princ[0].inputs["Metallic"].default_value
-        rough = princ[0].inputs["Roughness"].default_value
-    else:
-        metal, rough = 0.0, 0.5
-    return presets.choose_auto(metal, rough, "{} {}".format(obj_name, mat.name))
-
-
-def set_preset_values(mat, preset_id):
-    vals = presets.stack_inputs(presets.get(preset_id))
-    for st in stacks(mat.node_tree):
-        for k, v in vals.items():
-            sock = st.inputs.get(k)
-            if sock is not None:
-                _set(sock, v)
-    mat.realworn.preset = preset_id
-
-
-# -------------------------------------------------------------------- apply
-def apply(mat, preset_id="AUTO", obj_name=""):
-    """Inject RW_Stack into `mat` (or update its preset if already weathered).
-
-    Returns "applied" or "updated". Raises InjectError when the material cannot be used.
-    """
+# -------------------------------------------------------------------- setup
+def inject(mat):
+    """Wrap `mat` with its stack group (empty: pass-through). Raises InjectError."""
+    from . import compiler
     ok, why = can_edit(mat)
     if not ok:
         raise InjectError("{}: {}".format(mat.name if mat else "None", why))
-    resolved = resolve_preset(mat, preset_id, obj_name)
-    if is_applied(mat):
-        assets.ensure_groups()
-        set_preset_values(mat, resolved)
-        return "updated"
-    assets.ensure_groups()
+    if is_setup(mat):
+        return "already"
     tree = mat.node_tree
     out, princ = find_principled(tree)
     if out is None:
         raise InjectError("{}: no Material Output node".format(mat.name))
     snap = snapshot.serialize(tree)
-    mat.realworn.snapshot = snapshot.dumps(snap)
-    mat.realworn.schema_version = naming.SCHEMA
+    st = mat.realworn
+    st.snapshot = snapshot.dumps(snap)
+    st.schema_version = naming.SCHEMA
     try:
-        ox, oy = _abs(out)
+        compiler.ensure_group(mat)
         frame = nodeutil.ensure_frame(tree)
         if princ:
             for i, p in enumerate(princ):
-                _inject_channel(tree, p, i, frame, out)
-            mat.realworn.mode = "CHANNEL"
+                _inject_channel(tree, mat, p, i, frame, out)
+            st.mode = "CHANNEL"
         else:
-            _inject_shader(tree, out, frame)
-            mat.realworn.mode = "SHADER"
-        mat.realworn.applied = True
-        set_preset_values(mat, resolved)
+            _inject_shader(tree, mat, out, frame)
+            st.mode = "SHADER"
+        st.applied = True
+        compiler.compile(mat)
     except Exception:
         snapshot.restore(tree, snap)
-        mat.realworn.applied = False
-        mat.realworn.snapshot = ""
+        _drop_group(mat)
+        st.applied = False
+        st.snapshot = ""
         raise
-    return "applied"
+    return "setup"
 
 
-def remove(mat):
+def _drop_group(mat):
+    g = mat.realworn.stack
+    mat.realworn.stack = None
+    if g is not None and g.users == 0:
+        bpy.data.node_groups.remove(g)
+
+
+def restore(mat):
     """Remove every RealWorn node and restore the original tree. Returns remaining diffs."""
-    if not is_applied(mat):
+    if not is_setup(mat):
         return []
+    set_mask_view(mat, False)
     snap = snapshot.loads(mat.realworn.snapshot)
     diffs = snapshot.restore(mat.node_tree, snap)
     if not diffs:
-        mat.realworn.applied = False
-        mat.realworn.snapshot = ""
-        mat.realworn.preset = ""
-        mat.realworn.mode = ""
-        mat.realworn.baked = False
-        mat.realworn.decals = "[]"
+        st = mat.realworn
+        st.applied = False
+        st.snapshot = ""
+        st.mode = ""
+        st.baked = False
+        _drop_group(mat)
+        if mat.get("rw_disp_method") is not None:
+            mat.displacement_method = mat["rw_disp_method"]
+            del mat["rw_disp_method"]
     return diffs  # on mismatch the snapshot is kept for a retry
 
 
-# ------------------------------------------------------- edge/cavity sources
-def _ensure_source(tree, stack, role, group, out_name, in_name, frame):
-    n = nodeutil.find(tree, role)
-    if n is None:
-        n = nodeutil.new(tree, "ShaderNodeGroup", role, frame=frame)
-        n.node_tree = bpy.data.node_groups[group]
-        n.hide = True
-        x, y = _abs(stack)
-        _place(n, x - 220, y - (120 if "bevel" in role else 160))
-    tree.links.new(n.outputs[out_name], stack.inputs[in_name])
-    return n
-
-
-def _drop(tree, role):
-    n = nodeutil.find(tree, role)
-    if n is not None:
-        tree.nodes.remove(n)
-
-
-def _is_eevee(scene):
-    return scene is not None and scene.render.engine.startswith("BLENDER_EEVEE")
-
-
-def apply_sources(mat, edge_source, cavity_source, scene=None):
-    """MASK-7 / Raycast cavity: insert source groups only when chosen (zero cost otherwise)."""
+# ------------------------------------------------- outputs outside the stack
+def sync_outputs(mat):
+    """Displacement-mode damage: stack Displacement (mm) -> owned Displacement node -> output
+    (added to the user's own displacement if there is one). Removed when unused."""
     tree = mat.node_tree
-    frame = nodeutil.ensure_frame(tree)
-    for st in stacks(tree):
-        i = st.name.rsplit(".", 1)[-1]
-        if edge_source == "ATTRIBUTE":
-            _drop(tree, "bevel." + i)
-            st.inputs["Attr Edge Weight"].default_value = 1.0
+    g = mat.realworn.stack
+    if tree is None or g is None or not mat.realworn.applied:
+        return
+    used = any(ly.visible and ly.type == "DAMAGE" and ly.damage.depth_mode == "DISPLACEMENT"
+               for ly in mat.realworn.layers)
+    out = nodeutil.output_node(tree)
+    disp = nodeutil.find(tree, "disp")
+    st = stacks(tree)
+    if not used or not st or out is None:
+        if disp is not None:
+            add = nodeutil.find(tree, "disp_add")
+            orig = None
+            if add is not None:
+                orig = nodeutil.link_source(add.inputs[0])
+                tree.nodes.remove(add)
+            tree.nodes.remove(disp)
+            if orig is not None:
+                tree.links.new(orig, out.inputs["Displacement"])
+            if mat.get("rw_disp_method") is not None:
+                mat.displacement_method = mat["rw_disp_method"]
+                del mat["rw_disp_method"]
+        return
+    if disp is None:
+        frame = nodeutil.ensure_frame(tree)
+        disp = nodeutil.new(tree, "ShaderNodeDisplacement", "disp", frame=frame)
+        disp.inputs["Scale"].default_value = 0.001  # stack heights are millimetres
+        disp.inputs["Midlevel"].default_value = 0.0
+        x, y = _abs(out)
+        _place(disp, x - 220, y - 300)
+        orig = nodeutil.link_source(out.inputs["Displacement"])
+        if orig is not None:
+            add = nodeutil.new(tree, "ShaderNodeVectorMath", "disp_add", frame=frame)
+            add.operation = "ADD"
+            _place(add, x - 60, y - 300)
+            tree.links.new(orig, add.inputs[0])
+            tree.links.new(disp.outputs[0], add.inputs[1])
+            tree.links.new(add.outputs[0], out.inputs["Displacement"])
         else:
-            _ensure_source(tree, st, "bevel." + i, naming.SH_BEVEL_EDGE, "Edge", "Extra Edge", frame)
-            only_bevel = edge_source == "BEVEL" and not _is_eevee(scene)
-            st.inputs["Attr Edge Weight"].default_value = 0.0 if only_bevel else 1.0
-        st["rw_edge_source"] = edge_source
-        if cavity_source == "ATTRIBUTE":
-            _drop(tree, "raycav." + i)
-            st.inputs["Attr Cavity Weight"].default_value = 1.0
-        else:
-            _ensure_source(tree, st, "raycav." + i, naming.SH_RAY_CAVITY, "Cavity", "Extra Cavity", frame)
-            st.inputs["Attr Cavity Weight"].default_value = 0.0 if cavity_source == "RAYCAST" else 1.0
-        st["rw_cavity_source"] = cavity_source
+            tree.links.new(disp.outputs[0], out.inputs["Displacement"])
+        if mat.get("rw_disp_method") is None:
+            mat["rw_disp_method"] = mat.displacement_method
+        mat.displacement_method = "BOTH"
+    tree.links.new(st[0].outputs["Displacement"], disp.inputs["Height"])
 
 
-def update_sources(obj, scene=None):
-    for slot in obj.material_slots:
-        if is_applied(slot.material):
-            apply_sources(slot.material, obj.realworn.edge_source, obj.realworn.cavity_source, scene)
-
-
-def apply_engine_fallback(scene):
-    """EEVEE has no Bevel node: Bevel-only edge source silently falls back to the attribute."""
-    eevee = _is_eevee(scene)
-    n = 0
-    for mat in bpy.data.materials:
-        if not is_applied(mat):
-            continue
-        for st in stacks(mat.node_tree):
-            if st.get("rw_edge_source") == "BEVEL":
-                st.inputs["Attr Edge Weight"].default_value = 1.0 if eevee else 0.0
-                n += 1
-    return n
+def set_mask_view(mat, state):
+    """PNT-8: route the stack's Mask View output to the surface as greyscale emission."""
+    tree = mat.node_tree
+    if tree is None:
+        return False
+    out = nodeutil.output_node(tree)
+    emis = nodeutil.find(tree, "maskview")
+    if state:
+        st = stacks(tree)
+        if not st or out is None:
+            return False
+        if emis is None:
+            src = nodeutil.link_source(out.inputs["Surface"])
+            mat["rw_maskview_src"] = json.dumps(nodeutil.socket_ref(src) if src is not None else None)
+            emis = nodeutil.new(tree, "ShaderNodeEmission", "maskview", frame=nodeutil.ensure_frame(tree))
+            x, y = _abs(out)
+            _place(emis, x, y + 200)
+        tree.links.new(st[0].outputs["Mask View"], emis.inputs["Color"])
+        tree.links.new(emis.outputs[0], out.inputs["Surface"])
+        return True
+    if emis is None:
+        return False
+    tree.nodes.remove(emis)
+    ref = json.loads(mat.get("rw_maskview_src", "null"))
+    src = nodeutil.resolve(tree, ref)
+    if out is not None and src is not None:
+        tree.links.new(src, out.inputs["Surface"])
+    if "rw_maskview_src" in mat:
+        del mat["rw_maskview_src"]
+    return True

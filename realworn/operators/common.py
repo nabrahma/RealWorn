@@ -19,3 +19,28 @@ def target_objects(context, names, meshes_only=True):
 
 def scene_of(context):
     return context.scene or bpy.context.scene
+
+
+def report_all(op, reps):
+    for level, msg in reps:
+        op.report({level}, msg)
+
+
+def resolve_material(context, object_name="", material_name=""):
+    """(object, material) from explicit names, else the active object's active material."""
+    ob = bpy.data.objects.get(object_name) if object_name else context.active_object
+    if material_name:
+        mat = bpy.data.materials.get(material_name)
+        return ob, mat
+    if ob is None or ob.type != "MESH":
+        return ob, None
+    return ob, ob.active_material
+
+
+def resolve_layer(mat, layer_id=""):
+    """Index of the layer with `layer_id`, else the material's active layer index."""
+    if layer_id:
+        for i, ly in enumerate(mat.realworn.layers):
+            if ly.id == layer_id or ly.name == layer_id:
+                return i
+    return max(0, min(mat.realworn.active_layer_index, len(mat.realworn.layers) - 1))
