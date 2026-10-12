@@ -123,6 +123,7 @@ def _inject_channel(tree, mat, principled, idx, frame, out):
     px, py = _abs(principled)
     stack, geom = _new_stack(tree, mat, idx, frame, px - 320, py)
     stack["rw_principled"] = principled.name  # Bake swaps and Restore Live Stack relink by this
+    hs = height_source(tree, principled, out)  # before the Normal input is relinked to the stack
     for ch in naming.CHANNELS:
         pin, sin = principled.inputs[ch], stack.inputs[ch]
         src = nodeutil.link_source(pin)
@@ -133,7 +134,6 @@ def _inject_channel(tree, mat, principled, idx, frame, out):
         else:
             sin.default_value = pin.default_value
         tree.links.new(stack.outputs[ch], pin)
-    hs = height_source(tree, principled, out)
     if hs is not None:
         tree.links.new(hs, stack.inputs["Height"])
     return stack

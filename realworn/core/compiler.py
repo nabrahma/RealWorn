@@ -277,9 +277,9 @@ def apply_content(b, layer, mask, cur, ctx):
         var = b.group(naming.SH_VARIATION, "variation", Amount=layer.variation, Scale=layer.variation_scale)
     if layer.color.enabled:
         val = _channel_source(b, layer, "color", layer.color, False)
-        if layer.type in ("PAINT",) and layer.content_image is not None:
-            img = _image_node(b, "content", layer.content_image, _paint_uv(b), non_color=False)
-            val = b.mix(1.0, val, img.outputs["Color"], blend="MULTIPLY")
+        content = b.nodes.get(naming.layer_node(layer.id, "content"))
+        if layer.type == "PAINT" and content is not None:
+            val = b.mix(1.0, val, content.outputs["Color"], blend="MULTIPLY")
         if var is not None:
             b.links.new(val, var.inputs["Color"])
             val = b.outp(var, "Color")
@@ -293,6 +293,14 @@ def apply_content(b, layer, mask, cur, ctx):
                 val = b.clamp(b.add(val, b.outp(var, "Roughness Offset")))
             mode = ch.blend if ch.blend in ("MIX", "MIN", "MAX") else "MIX"
             cur[key] = _blend_scalar(b, mode, mask, cur[key], val)
+    if layer.normal_image is not None and any(getattr(layer, c).use_uv for c in ("color", "roughness", "height")):
+        # tangent-space maps are only valid through a UV map (box projection has no tangents;
+        # with box projection the PBR set's height map gives the relief instead)
+        uvn = b.named("ShaderNodeUVMap", "normal.uv")
+        img = _image_node(b, "normal.img", layer.normal_image, uvn.outputs[0], non_color=True)
+        nm = b.named("ShaderNodeNormalMap", "normal.map", Strength=layer.normal_strength)
+        b.links.new(img.outputs["Color"], nm.inputs["Color"])
+        cur["Normal"] = b.mixv(mask, cur["Normal"], nm.outputs["Normal"])
     if layer.height.enabled:
         val = _channel_source(b, layer, "height", layer.height, True)
         mode = layer.height.blend if layer.height.blend in ("ADD", "SUBTRACT", "MAX", "REPLACE") else "ADD"
@@ -335,6 +343,10 @@ def compile(mat):
         if layer.type == "DECAL":
             from . import decals
             decal_alpha = decals.build_projection(b, layer, cur, ctx)
+        elif layer.type == "PAINT" and layer.content_image is not None:
+            # PNT-10: a Paint layer shows where its colour image was painted (content alpha)
+            content = _image_node(b, "content", layer.content_image, _paint_uv(b), non_color=False)
+            decal_alpha = content.outputs["Alpha"]
         mask = build_mask(b, layer, masks, base_height, decal_alpha)
         if mask is not None:
             masks[layer.id] = mask
@@ -393,6 +405,7 @@ _VALUE_ROLES = {
     (None, "height_blend"): ("hblend", "Amount", None),
     (None, "variation"): ("variation", "Amount", None),
     (None, "variation_scale"): ("variation", "Scale", None),
+    (None, "normal_strength"): ("normal.map", "Strength", None),
 }
 
 

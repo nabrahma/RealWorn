@@ -179,6 +179,10 @@ class RWLayer(bpy.types.PropertyGroup):
     height: PointerProperty(type=RWChannel)
     mask_image: PointerProperty(name="Mask", type=bpy.types.Image, update=_struct)
     content_image: PointerProperty(name="Content", type=bpy.types.Image, update=_struct)
+    normal_image: PointerProperty(name="Normal Map", type=bpy.types.Image, update=_struct,
+                                  description="PBR Set normal map (OpenGL); used when the layer maps by UV")
+    normal_strength: FloatProperty(name="Normal Strength", default=1.0, min=0.0, max=4.0,
+                                   update=_v("normal_strength"))
     ingredients: CollectionProperty(type=RWIngredient)
     active_ingredient: IntProperty(default=0)
     lock_source: EnumProperty(name="Edge Lock", items=LOCK_ITEMS, default="NONE", update=_struct)

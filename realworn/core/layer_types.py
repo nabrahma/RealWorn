@@ -31,7 +31,7 @@ TYPES = {
         "height": _ch(False, 0.0, "ADD"), "suggest": "UP",
     },
     "RUST": {
-        "label": "Rust", "icon": "SEQUENCE_COLOR_03",
+        "label": "Rust", "icon": "COLORSET_02_VEC",
         "color": _ch(True, (0.32, 0.12, 0.04), "MIX", "TINTED_GRUNGE"), "roughness": _ch(True, 0.85),
         "metallic": _ch(True, 0.0), "height": _ch(True, 0.5, "ADD"), "suggest": "GRUNGE:rust_spots",
     },
@@ -48,7 +48,9 @@ TYPES = {
     },
     "WATER": {
         "label": "Water", "icon": "MOD_FLUIDSIM",
-        "color": _ch(False, (0.0, 0.0, 0.0)), "roughness": _ch(True, 0.03), "metallic": _ch(True, 0.0),
+        # metallic keeps the base (deviation from the PRD table's "0", see P4 notes): water over
+        # steel is still steel under a film; the coat models the water itself
+        "color": _ch(False, (0.0, 0.0, 0.0)), "roughness": _ch(True, 0.03), "metallic": _ch(False, 0.0),
         "height": _ch(False, 0.0, "ADD"), "water": True,
     },
     "PAINT": {

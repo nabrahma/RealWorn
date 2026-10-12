@@ -11,7 +11,7 @@ CHANNELS = (("color", "Color"), ("roughness", "Roughness"), ("metallic", "Metall
 
 def op(layout, idname, **kw):
     """layout.operator that tolerates operators from later milestones not being registered."""
-    if not hasattr(bpy.types, "RW_OT_" + idname.split(".", 1)[1]):
+    if not hasattr(bpy.types, "REALWORN_OT_" + idname.split(".", 1)[1]):  # registered name
         r = layout.row()
         r.enabled = False
         r.label(text=kw.get("text") or idname.split(".", 1)[1].replace("_", " ").title(), icon=kw.get("icon", "NONE"))
@@ -142,8 +142,13 @@ def _channel(layout, layer, key, label):
 
 
 def draw_content(layout, mat, layer):
+    opx(layout, "realworn.pbrset_load", icon="FILEBROWSER")
     for key, label in CHANNELS:
         _channel(layout, layer, key, label)
+    if layer.normal_image is not None:
+        r = layout.row(align=True)
+        r.label(text=layer.normal_image.name, icon="NORMALS_FACE")
+        r.prop(layer, "normal_strength", text="")
     row = layout.row(align=True)
     row.prop(layer, "use_variation", toggle=True)
     if layer.use_variation:
@@ -202,7 +207,7 @@ def draw_mask(layout, mat, layer):
             box.prop(ing, "angle")
         elif ing.kind == "REFERENCE":
             box.prop_search(ing, "ref_layer_id", st, "layers", text="Layer")
-    if hasattr(bpy.types, "RW_OT_ingredient_add"):
+    if hasattr(bpy.types, "REALWORN_OT_ingredient_add"):
         box.operator_menu_enum("realworn.ingredient_add", "kind", text="Add Ingredient", icon="ADD")
     box = layout.box()
     row = box.row(align=True)

@@ -92,14 +92,15 @@ def build_variation():
     t.out("Roughness Offset", "FLOAT")
     tc = t.outp(t.node("ShaderNodeTexCoord"), "Object")
     v = t.vmath("DIVIDE", tc, t.comb(t.I("Scale"), t.I("Scale"), t.I("Scale")))
-    n1 = t.noise(v, 1.0, detail=2.0)
-    n2 = t.noise(t.vmath("ADD", v, (17.3, 5.1, 9.7)), 1.0, detail=2.0)
+    # Perlin fBm sits mostly in 0.3..0.7: stretch it to -1..1 before scaling
+    n1 = t.maprange(t.noise(v, 1.0, detail=2.0), 0.3, 0.7, -1.0, 1.0)
+    n2 = t.maprange(t.noise(t.vmath("ADD", v, (17.3, 5.1, 9.7)), 1.0, detail=2.0), 0.3, 0.7, -1.0, 1.0)
     amt = t.I("Amount")
-    hsv = t.node("ShaderNodeHueSaturation", Hue=t.add(0.5, t.mul_all(t.sub(n1, 0.5), amt, 0.12)),
-                 Saturation=1.0, Value=t.add(1.0, t.mul_all(t.sub(n2, 0.5), amt, 1.2)), Fac=1.0,
+    hsv = t.node("ShaderNodeHueSaturation", Hue=t.add(0.5, t.mul_all(n1, amt, 0.05)),
+                 Saturation=1.0, Value=t.add(1.0, t.mul_all(n2, amt, 0.5)), Fac=1.0,
                  Color=t.I("Color"))
     t.O("Color", t.outp(hsv))
-    t.O("Roughness Offset", t.mul_all(t.sub(n1, 0.5), amt, 0.4))
+    t.O("Roughness Offset", t.mul_all(n1, amt, 0.25))
     t.layout()
     return t.t
 

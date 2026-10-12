@@ -21,6 +21,7 @@ def test_table_matches_prd():
     assert d("WEAR")["metallic"]["value"] == 1.0 and d("WEAR")["lock_source"] == "EDGE"
     assert d("WEAR")["lock_strength"] == 0.6 and d("WEAR")["height"]["blend"] == "SUBTRACT"
     assert d("WATER")["roughness"]["value"] == 0.03
+    assert d("WATER")["metallic"]["enabled"] is False  # keeps base metallic (P4 deviation, see notes)
     assert d("SCRATCHES")["metallic"]["enabled"] is False  # keeps base metallic
     assert d("CUSTOM")["height"]["enabled"] and d("CUSTOM")["color"]["value"] == (0.5, 0.5, 0.5)
     assert set(LT.ORDER) == set(LT.TYPES)
