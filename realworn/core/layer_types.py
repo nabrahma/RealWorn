@@ -32,7 +32,7 @@ TYPES = {
     },
     "RUST": {
         "label": "Rust", "icon": "COLORSET_02_VEC",
-        "color": _ch(True, (0.32, 0.12, 0.04), "MIX", "TINTED_GRUNGE"), "roughness": _ch(True, 0.85),
+        "color": _ch(True, (0.16, 0.055, 0.018), "MIX", "TINTED_GRUNGE"), "roughness": _ch(True, 0.85),
         "metallic": _ch(True, 0.0), "height": _ch(True, 0.5, "ADD"), "suggest": "GRUNGE:rust_spots",
     },
     "WEAR": {

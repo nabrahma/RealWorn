@@ -116,7 +116,7 @@ def test_tinted_grunge_varies_colour(empty_scene, out_dir):
     flat = ru.render(sc, os.path.join(out_dir, "p3_flat.png"))
     s_t, s_f = float(tinted[20:76, 20:76].mean(axis=2).std()), float(flat[20:76, 20:76].mean(axis=2).std())
     print("\n[tinted] brightness std tinted {:.4f}, flat {:.4f}".format(s_t, s_f))
-    assert s_t > s_f * 3 and s_t > 0.02
+    assert s_t > s_f * 5 and s_t > 0.01  # relative: the rust colour itself is dark
     assert float(tinted[..., 0].mean()) > float(tinted[..., 2].mean())  # still rust-coloured
 
 

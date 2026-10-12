@@ -104,6 +104,57 @@ class RW_OT_ingredient_remove(_Target, bpy.types.Operator):
 _classes = (RW_OT_grunge_select, RW_OT_ingredient_add, RW_OT_ingredient_remove)
 
 
+def _preset_items(self, context):
+    from ..core import mask_presets
+    _preset_items.cache = [(n, n, "") for n in mask_presets.list_presets()] or [("NONE", "No presets", "")]
+    return _preset_items.cache
+
+
+class RW_OT_mask_preset_save(_Target, bpy.types.Operator):
+    """Save this layer's mask setup (ingredients, Edge Lock, Levels; not the painted image) as a preset"""
+    bl_idname = "realworn.mask_preset_save"
+    bl_label = "Save Mask Preset"
+
+    name: StringProperty(name="Name", default="My Mask")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
+        from ..core import mask_presets
+        ob, mat, layer = self._resolve(context)
+        if layer is None:
+            return {"CANCELLED"}
+        path = mask_presets.save(mat, layer, self.name)
+        self.report({"INFO"}, "Saved {}".format(path))
+        return {"FINISHED"}
+
+
+class RW_OT_mask_preset_load(_Target, bpy.types.Operator):
+    """Apply a saved mask preset to this layer (its painted mask is kept)"""
+    bl_idname = "realworn.mask_preset_load"
+    bl_label = "Load Mask Preset"
+    bl_options = {"REGISTER", "UNDO"}
+    bl_property = "preset"
+
+    preset: EnumProperty(name="Preset", items=_preset_items)
+
+    def invoke(self, context, event):
+        context.window_manager.invoke_search_popup(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        from ..core import mask_presets
+        ob, mat, layer = self._resolve(context)
+        if layer is None or self.preset == "NONE":
+            return {"CANCELLED"}
+        mask_presets.load(mat, layer, self.preset)
+        return {"FINISHED"}
+
+
+_classes = _classes + (RW_OT_mask_preset_save, RW_OT_mask_preset_load)
+
+
 def register():
     for c in _classes:
         bpy.utils.register_class(c)
