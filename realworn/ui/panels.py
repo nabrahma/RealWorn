@@ -129,6 +129,39 @@ class RW_PT_decals(_Base, bpy.types.Panel):
         lay.operator("realworn.decal_cleanup", icon="BRUSH_DATA")
 
 
+class RW_PT_damage(_Base, bpy.types.Panel):
+    bl_label = "Damage"
+    bl_idname = "RW_PT_damage"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        from ..core import damage
+        lay = self.layout
+        ob = context.active_object
+        mod = damage.damage_modifier(ob) if ob is not None and ob.type == "MESH" else None
+        row = lay.row(align=True)
+        row.operator("realworn.damage_add", icon="MOD_BOOLEAN")
+        row.operator("realworn.damage_remove", text="", icon="X")
+        if mod is None:
+            p = context.scene.realworn
+            col = lay.column(align=True)
+            for prop in ("dmg_strength", "dmg_seed", "dmg_size_min", "dmg_size_max", "dmg_density"):
+                col.prop(p, prop)
+            row = lay.row(align=True)
+            row.prop(p, "dmg_corners", toggle=True)
+            row.prop(p, "dmg_debris", toggle=True)
+            return
+        col = lay.column(align=True)
+        for name in ("Strength", "Seed", "Size Min", "Size Max", "Density", "Corner Scale"):
+            col.prop(masks._input_item(mod, name), "value", text=name)
+        row = lay.row(align=True)
+        row.prop(masks._input_item(mod, "Corners"), "value", text="Corners", toggle=True)
+        row.prop(masks._input_item(mod, "Debris"), "value", text="Debris", toggle=True)
+        row = lay.row(align=True)
+        row.prop(mod, "show_viewport", text="Show in Viewport", toggle=True)
+        row.prop(masks._input_item(mod, "Use Exact"), "value", text="Exact Solver", toggle=True)
+
+
 class RW_PT_debug(_Base, bpy.types.Panel):
     bl_label = "Debug"
     bl_idname = "RW_PT_debug"
@@ -142,7 +175,7 @@ class RW_PT_debug(_Base, bpy.types.Panel):
         lay.operator("realworn.remove_all", icon="TRASH")
 
 
-_classes = (RW_PT_scene, RW_PT_object, RW_PT_mask_settings, RW_PT_decals, RW_PT_debug)
+_classes = (RW_PT_scene, RW_PT_object, RW_PT_mask_settings, RW_PT_decals, RW_PT_damage, RW_PT_debug)
 
 
 def register():

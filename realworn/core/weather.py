@@ -147,6 +147,7 @@ def mark_occluder(obj, state=True):
     elif not state and obj.name in coll.objects:
         coll.objects.unlink(obj)
     obj.realworn.is_occluder = state
+    masks.sync_collections(obj)
 
 
 def resync_all():

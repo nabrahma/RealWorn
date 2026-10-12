@@ -201,3 +201,20 @@ def test_masks_performance_100k(empty_scene):
     record("RW_Masks evaluation, {}k-vert sharp cube".format(nverts // 1000), best * 1000, "ms", 200,
            "best of 4 headless depsgraph updates")
     assert best < 0.2
+
+
+def test_no_self_referencing_collections(empty_scene):
+    """A ground object reading RW_Ground (or an occluder reading RW_Occluders) is a depsgraph
+    cycle that made other objects see stale ground geometry on first evaluation."""
+    from realworn.core import weather
+    floor = ms.street(empty_scene)
+    roof = ms.roof(empty_scene)
+    for o in (floor, roof):
+        masks.ensure_masks(o)
+    weather.mark_ground(floor, empty_scene)
+    weather.mark_occluder(roof)
+    fm, rm = masks.masks_modifier(floor), masks.masks_modifier(roof)
+    assert masks.get_input(fm, "Ground") is None and masks.get_input(fm, "Use Contact") is False
+    assert masks.get_input(rm, "Occluders") is None and masks.get_input(rm, "Use Shelter") is False
+    weather.mark_ground(floor, empty_scene, False)
+    assert masks.get_input(fm, "Ground").name == naming.COLL_GROUND

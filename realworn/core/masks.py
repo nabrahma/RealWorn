@@ -132,10 +132,15 @@ def sync_collections(obj, mod=None):
         return
     ground = ensure_collection(naming.COLL_GROUND)
     occ = ensure_collection(naming.COLL_OCCLUDERS)
-    set_input(mod, "Ground", ground)
-    set_input(mod, "Occluders", occ)
+    # An object must never read a collection that contains itself: that is a depsgraph cycle,
+    # and Blender then evaluates the ground before its own modifiers are done, so other objects
+    # see stale geometry. Ground objects skip contact, occluders skip self-shelter.
     is_ground = obj.name in ground.objects
+    is_occ = obj.name in occ.objects
+    set_input(mod, "Ground", None if is_ground else ground)
+    set_input(mod, "Occluders", None if is_occ else occ)
     set_input(mod, "Use Contact", not is_ground)
+    set_input(mod, "Use Shelter", not is_occ)
     obj.update_tag()
 
 
