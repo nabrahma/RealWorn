@@ -14,9 +14,9 @@ def _cube_scene(scene, name="PresetCube"):
     ob = ms.bevel_cube(scene, name=name, size=1.0, bevel=0.02, cuts=10, location=(0, 0, 0.5),
                        material=ms.principled(name + "Mat", (0.15, 0.3, 0.55), roughness=0.4))
     ms.camera_light(scene, cam_loc=(2.0, -2.2, 1.7), target=(0, 0, 0.45), lens=50)
-    scene.realworn.age = 0.8
-    scene.realworn.dirt = 0.7
-    scene.realworn.dust = 0.5
+    scene["rw_age"] = 0.8
+    scene["rw_dirt"] = 0.7
+    scene["rw_dust"] = 0.5
     return ob
 
 
@@ -52,7 +52,7 @@ def test_ten_duplicates_wear_differently(empty_scene, out_dir):
     assert len({c.realworn.seed for c in crates}) == 10
     cam = ms.camera_light(empty_scene)
     ru.look_at(cam, (5.625, -6, 0.5), (5.625, 0, 0.5), ortho_scale=12.6)
-    empty_scene.realworn.age = 0.9
+    empty_scene["rw_age"] = 0.9
     ru.setup(empty_scene, samples=16, res=(1000, 120))
     img = ru.render(empty_scene, os.path.join(out_dir, "ten_crates.png"))
     w = img.shape[1] / 10.08  # 12.6 m / 1.25 m per crate

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""RealWorn: one-click weathering with scene-level weather for Blender 5.2+.
+"""RealWorn: hand-painted wear, dirt, water, decals and damage for Blender 5.2+.
 
 This file only registers and unregisters; see core/ for the logic.
 """

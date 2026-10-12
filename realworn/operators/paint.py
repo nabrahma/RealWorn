@@ -7,7 +7,7 @@ from ..core import masks, naming, paint
 
 
 class RW_OT_paint_wear(bpy.types.Operator):
-    """Paint wear by hand: red adds wear, blue removes it, green keeps an area dry (Ctrl clears)"""
+    """Paint wear by hand: red adds wear, blue removes it (Ctrl clears)"""
     bl_idname = "realworn.paint_wear"
     bl_label = "Paint Wear"
     bl_options = {"REGISTER", "UNDO"}
@@ -15,7 +15,6 @@ class RW_OT_paint_wear(bpy.types.Operator):
     channel: EnumProperty(name="Brush", items=[
         ("ADD", "Add Wear", "Red: forces edge wear"),
         ("REMOVE", "Remove Wear", "Blue: removes wear, dirt, grime and dust"),
-        ("DRY", "Keep Dry", "Green: no wetness or puddles"),
     ], default="ADD")
 
     @classmethod

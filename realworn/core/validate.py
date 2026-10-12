@@ -41,18 +41,12 @@ def validate(scene=None):
         if mod is not None:
             if naming.ATTR_PAINT not in o.data.color_attributes:
                 out.append(("WARNING", "{}: no rw_paint attribute (Paint Wear will create it)".format(o.name)))
-            for coll, inp in ((naming.COLL_GROUND, "Ground"), (naming.COLL_OCCLUDERS, "Occluders")):
-                c = bpy.data.collections.get(coll)
-                if c is not None and o.name in c.objects and masks.get_input(mod, inp) is not None:
-                    out.append(("ERROR", "{}: reads {} which contains itself (dependency cycle)".format(o.name, coll)))
+            c = bpy.data.collections.get(naming.COLL_GROUND)
+            if c is not None and o.name in c.objects and masks.get_input(mod, "Ground") is not None:
+                out.append(("ERROR", "{}: reads {} which contains itself (dependency cycle)".format(
+                    o.name, naming.COLL_GROUND)))
             if masks.has_nonuniform_scale(o):
                 out.append(("INFO", "{}: non-uniform scale; mask widths use the mean scale".format(o.name)))
             if masks.large_ngon_count(o.data):
                 out.append(("INFO", "{}: large n-gons; masks smear across them".format(o.name)))
-    for sc in ([scene] if scene is not None else bpy.data.scenes):
-        p = sc.realworn
-        for prop, key in (("age", naming.SC_AGE), ("dirt", naming.SC_DIRT), ("dust", naming.SC_DUST),
-                          ("wetness", naming.SC_WETNESS)):
-            if key in sc and abs(sc[key] - getattr(p, prop)) > 1e-6:
-                out.append(("WARNING", "{}: {} out of sync ({} vs {})".format(sc.name, key, sc[key], getattr(p, prop))))
     return out

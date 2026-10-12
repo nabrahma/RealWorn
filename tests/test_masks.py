@@ -132,24 +132,16 @@ def test_remove_masks_restores_mesh(empty_scene):
     assert naming.ATTR_PAINT not in ob.data.color_attributes
 
 
-def test_contact_and_shelter(empty_scene):
+def test_contact(empty_scene):
     floor = ms.street(empty_scene)
     box = ms.sharp_cube(empty_scene, size=1.0, cuts=8, location=(0, 0, 0.5))
-    rf = ms.roof(empty_scene, size=(3, 3, 0.1), location=(0, 0, 2.5))
-    from realworn.core import weather
-    weather.mark_ground(floor, empty_scene)
-    weather.mark_occluder(rf)
+    masks.mark_ground(floor)
     r = _eval(box)
     pts = [_local(box, c) for c in r["co"]]
     low = [v for p, v in zip(pts, r[naming.ATTR_CONTACT]) if p.z < -0.45]
     high = [v for p, v in zip(pts, r[naming.ATTR_CONTACT]) if p.z > 0.45]
-    shel = _mean(r[naming.ATTR_SHELTER])
-    print("\n[contact] bottom {:.3f} top {:.3f}; shelter mean under roof {:.3f}".format(_mean(low), _mean(high), shel))
+    print("\n[contact] bottom {:.3f} top {:.3f}".format(_mean(low), _mean(high)))
     assert _mean(low) > 0.8 and _mean(high) < 0.05
-    assert shel > 0.9
-    weather.mark_occluder(rf, False)
-    r2 = masks.read_masks(box, bpy.context.evaluated_depsgraph_get())
-    assert _mean(r2[naming.ATTR_SHELTER]) < 0.05
 
 
 def test_non_mesh_rejected(empty_scene):
@@ -204,17 +196,12 @@ def test_masks_performance_100k(empty_scene):
 
 
 def test_no_self_referencing_collections(empty_scene):
-    """A ground object reading RW_Ground (or an occluder reading RW_Occluders) is a depsgraph
-    cycle that made other objects see stale ground geometry on first evaluation."""
-    from realworn.core import weather
+    """A ground object reading RW_Ground is a depsgraph cycle that made other objects see stale
+    ground geometry on first evaluation."""
     floor = ms.street(empty_scene)
-    roof = ms.roof(empty_scene)
-    for o in (floor, roof):
-        masks.ensure_masks(o)
-    weather.mark_ground(floor, empty_scene)
-    weather.mark_occluder(roof)
-    fm, rm = masks.masks_modifier(floor), masks.masks_modifier(roof)
+    masks.ensure_masks(floor)
+    masks.mark_ground(floor)
+    fm = masks.masks_modifier(floor)
     assert masks.get_input(fm, "Ground") is None and masks.get_input(fm, "Use Contact") is False
-    assert masks.get_input(rm, "Occluders") is None and masks.get_input(rm, "Use Shelter") is False
-    weather.mark_ground(floor, empty_scene, False)
+    masks.mark_ground(floor, False)
     assert masks.get_input(fm, "Ground").name == naming.COLL_GROUND

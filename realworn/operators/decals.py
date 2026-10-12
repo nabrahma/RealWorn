@@ -1,14 +1,13 @@
-"""Decal operators: Place (modal), Place at Cursor, Auto Leaks, Clean Up Decals (W5, W6)."""
+"""Decal operators: Place (modal), Place at Cursor, Clean Up Decals (W5)."""
 
 import math
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, StringProperty
 from mathutils import Matrix, Vector
 
 from ..core import decals
 from ..props import DECAL_MODE_ITEMS
-from .common import OBJECTS_DESC, target_objects
 
 
 def _report(op, reps):
@@ -121,28 +120,6 @@ class RW_OT_decal_place(bpy.types.Operator):
         return {"RUNNING_MODAL"}
 
 
-class RW_OT_decal_auto_leaks(bpy.types.Operator):
-    """Spawn grime leak decals below overhangs, sills and parapets of the selected objects"""
-    bl_idname = "realworn.decal_auto_leaks"
-    bl_label = "Auto Leaks"
-    bl_options = {"REGISTER", "UNDO"}
-
-    seed: IntProperty(name="Seed", default=0, min=0)
-    spacing: FloatProperty(name="Spacing", default=1.5, min=0.2, max=10.0, subtype="DISTANCE")
-    objects: StringProperty(name="Objects", description=OBJECTS_DESC, default="")
-
-    def invoke(self, context, event):
-        self.seed = context.scene.realworn.leak_seed
-        return self.execute(context)
-
-    def execute(self, context):
-        obs = target_objects(context, self.objects)
-        made, rep = decals.auto_leaks(context.scene, obs, seed=self.seed, spacing=self.spacing)
-        _report(self, rep)
-        self.report({"INFO"}, "Spawned {} leak decal(s)".format(len(made)))
-        return {"FINISHED"}
-
-
 class RW_OT_decal_cleanup(bpy.types.Operator):
     """Remove decal layers whose Empty was deleted and re-target decals that were moved"""
     bl_idname = "realworn.decal_cleanup"
@@ -155,7 +132,7 @@ class RW_OT_decal_cleanup(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_decal_place, RW_OT_decal_auto_leaks, RW_OT_decal_cleanup)
+_classes = (RW_OT_decal_place, RW_OT_decal_cleanup)
 
 
 def register():

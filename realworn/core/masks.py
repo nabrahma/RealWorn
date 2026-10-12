@@ -16,7 +16,7 @@ MASK_DEFAULTS = {
 
 # ------------------------------------------------------------- collections
 def ensure_collection(name):
-    """RW_Ground / RW_Occluders / RW_Decals: kept alive by a fake user, not linked to scenes."""
+    """RW_Ground / RW_Decals: kept alive by a fake user, not linked to scenes."""
     coll = bpy.data.collections.get(name)
     if coll is None:
         coll = bpy.data.collections.new(name)
@@ -126,22 +126,34 @@ def ensure_masks(obj, settings=None):
 
 
 def sync_collections(obj, mod=None):
-    """Point the modifier at RW_Ground / RW_Occluders and disable contact on ground objects."""
+    """Point the modifier at RW_Ground and disable contact on ground objects."""
     mod = mod or masks_modifier(obj)
     if mod is None:
         return
     ground = ensure_collection(naming.COLL_GROUND)
-    occ = ensure_collection(naming.COLL_OCCLUDERS)
     # An object must never read a collection that contains itself: that is a depsgraph cycle,
     # and Blender then evaluates the ground before its own modifiers are done, so other objects
-    # see stale geometry. Ground objects skip contact, occluders skip self-shelter.
+    # see stale geometry. Ground objects skip contact.
     is_ground = obj.name in ground.objects
-    is_occ = obj.name in occ.objects
     set_input(mod, "Ground", None if is_ground else ground)
-    set_input(mod, "Occluders", None if is_occ else occ)
     set_input(mod, "Use Contact", not is_ground)
-    set_input(mod, "Use Shelter", not is_occ)
     obj.update_tag()
+
+
+def mark_ground(obj, state=True):
+    """Ground objects are what the Contact generator measures distance to (RW_Ground)."""
+    coll = ensure_collection(naming.COLL_GROUND)
+    if state and obj.name not in coll.objects:
+        coll.objects.link(obj)
+    elif not state and obj.name in coll.objects:
+        coll.objects.unlink(obj)
+    obj.realworn.is_ground = state
+    if naming.OB_GROUND in naming.OBJECT_PROPS:
+        obj[naming.OB_GROUND] = 1.0 if state else 0.0
+    for o in bpy.data.objects:
+        if masks_modifier(o) is not None:
+            sync_collections(o)
+    return obj
 
 
 def remove_masks(obj):

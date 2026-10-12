@@ -1,10 +1,11 @@
-"""Builds the RW_Masks Geometry Nodes group (MASK-1..MASK-5, rw_shelter for M4).
+"""Builds the RW_Masks Geometry Nodes group (MASK-1..MASK-5).
+
+v2: these are optional mask generators (Edge, Cavity, Contact ingredients), added on demand.
 
 Writes point-domain float attributes on the (optionally pre-subdivided) mesh:
 rw_edge     distance falloff to convex edges (signed angle > +threshold), blurred
 rw_cavity   distance falloff to concave edges (signed angle < -threshold), blurred
 rw_contact  distance falloff to the RW_Ground collection surfaces
-rw_shelter  1 where a ray straight up (world Z) hits the RW_Occluders collection
 Widths are world-space metres: they are divided by the object's mean scale.
 """
 
@@ -42,7 +43,7 @@ def _edge_distance_mask(t, mesh, selection, width, blur, broad=0.0):
 def build():
     t = Tree.new_group(naming.GN_MASKS, "GEOMETRY")
     t.t.is_modifier = True
-    t.t.description = "RealWorn mask engine: writes rw_edge, rw_cavity, rw_contact, rw_shelter"
+    t.t.description = "RealWorn mask engine: writes rw_edge, rw_cavity, rw_contact"
     t.inp("Geometry", "GEO")
     t.inp("Edge Angle Threshold", "FLOAT", math.radians(25), 0.0, math.pi, subtype="ANGLE",
           description="Edges sharper than this count as convex (wear) or concave (dirt)")
@@ -57,8 +58,6 @@ def build():
           description="Simple subdivisions before masking; -1 = auto (until edges are under 4x Edge Width, max 3)")
     t.inp("Use Contact", "BOOL", True, description="Compute contact grime against RW_Ground")
     t.inp("Ground", "COLLECTION")
-    t.inp("Use Shelter", "BOOL", True, description="Compute shelter against RW_Occluders")
-    t.inp("Occluders", "COLLECTION")
     t.out("Geometry", "GEO")
 
     geo = t.I("Geometry")
@@ -99,21 +98,9 @@ def build():
     contact = t.mul_all(_falloff(t, t.outp(gprox, "Distance"), con_w), t.outp(gprox, "Is Valid"),
                         t.I("Use Contact"))
 
-    # Shelter: ray straight up in world space, expressed in object space.
-    inv = t.node("FunctionNodeInvertMatrix", t.outp(info, "Transform"))
-    up = t.vmath("NORMALIZE", t.outp(t.node("FunctionNodeTransformDirection", (0.0, 0.0, 1.0), t.outp(inv, "Matrix"))))
-    occ = t.node("GeometryNodeCollectionInfo", t.I("Occluders"), props={"transform_space": "RELATIVE"})
-    occ_mesh = t.node("GeometryNodeRealizeInstances", t.outp(occ))
-    pos = t.outp(t.node("GeometryNodeInputPosition"))
-    start = t.vmath("ADD", pos, t.vmath("SCALE", up, scale=t.div(0.01, scale)))
-    ray = t.node("GeometryNodeRaycast", t.outp(occ_mesh), Source_Position=start, Ray_Direction=up,
-                 Ray_Length=t.div(10000.0, scale))
-    hit = t.mul(t.outp(ray, "Is Hit"), t.I("Use Shelter"))
-    shelter = t.outp(t.node("GeometryNodeBlurAttribute", hit, 1, props={"data_type": "FLOAT"}))
-
     out = mesh
     for name, value in ((naming.ATTR_EDGE, edge), (naming.ATTR_CAVITY, cavity),
-                        (naming.ATTR_CONTACT, contact), (naming.ATTR_SHELTER, shelter)):
+                        (naming.ATTR_CONTACT, contact)):
         st = t.node("GeometryNodeStoreNamedAttribute", out, True, name, value,
                     props={"data_type": "FLOAT", "domain": "POINT"}, label=name)
         out = t.outp(st)

@@ -5,7 +5,7 @@ import random
 import bpy
 from bpy.props import EnumProperty, StringProperty
 
-from ..core import weather, weathering
+from ..core import weathering
 from ..props import PRESET_ITEMS
 from .common import OBJECTS_DESC, target_objects
 
@@ -113,7 +113,7 @@ class RW_OT_randomize_seed(bpy.types.Operator):
     def execute(self, context):
         for o in target_objects(context, self.objects):
             o.realworn.seed = round(random.uniform(0.0, 1000.0), 2)
-            weather.sync_object(o)
+            weathering.sync_object(o)
         return {"FINISHED"}
 
 

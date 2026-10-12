@@ -2,31 +2,43 @@
 
 import os
 
-import numpy as np
 import pytest
 
 import render_util as ru
-from test_m4_weather import yard  # noqa: F401  (fixture)
+from fixtures import make_scenes as ms
+from realworn.core import masks, weathering
 
 VIEWS = {
     "oblique": ((6.0, -6.0, 5.0), (0.0, 0.5, 0.5), 9.0),
-    "top": ((0.0, 0.0, 8.0), (0.0, 0.0, 0.0), 8.0),
-    "under_roof": ((-2.0, -6.0, 1.2), (-2.0, -2.0, 0.0), 5.0),
 }
-CASES = [("EDGE", "oblique", 0.0), ("CAVITY", "oblique", 0.0), ("CONTACT", "oblique", 0.0),
-         ("SHELTER", "under_roof", 0.0), ("PUDDLE", "top", 0.85), ("WETNESS", "under_roof", 0.6),
-         ("DUST", "oblique", 0.0), ("GRIME", "oblique", 0.0), ("STREAK", "oblique", 0.0)]
+CASES = [("EDGE", "oblique"), ("CAVITY", "oblique"), ("CONTACT", "oblique"), ("DUST", "oblique"),
+         ("GRIME", "oblique"), ("STREAK", "oblique")]
 
 
-@pytest.mark.parametrize("mode,view,wetness", CASES)
-def test_mask_parity(yard, out_dir, mode, view, wetness):  # noqa: F811
-    sc = yard["scene"]
-    if mode == "CAVITY":  # the yard has no inside corners; add an L-block
-        from fixtures import make_scenes as ms
-        from realworn.core import weathering
-        lb = ms.l_block(sc, location=(0.5, -1.0, 0.0), material=ms.principled("LMat"))
-        weathering.apply_object(lb, sc, "concrete")
-    sc.realworn.wetness = wetness
+@pytest.fixture
+def yard(empty_scene):
+    """Ground slab, a box on it, a tall wall, an L-block (inside corners), a camera."""
+    import bmesh
+    sc = empty_scene
+    ground = ms.street(sc, size=(8.0, 8.0), tiles=8, material=ms.principled("GroundMat", (0.3, 0.3, 0.3)))
+    obs = [ground]
+    for name, size, loc in (("Box", (1.0, 1.0, 1.0), (-2.0, 0.0, 0.5)), ("Wall", (3.0, 0.3, 3.0), (2.0, 3.0, 1.5))):
+        bm = bmesh.new()
+        ms._box(bm, size)
+        ms._subdivide(bm, 8)
+        obs.append(ms._link(sc, name, bm, loc, ms.principled(name + "Mat", (0.5, 0.5, 0.5), roughness=0.8)))
+    obs.append(ms.l_block(sc, location=(0.5, -1.0, 0.0), material=ms.principled("LMat")))
+    ms.camera_light(sc)
+    for o in obs:
+        weathering.apply_object(o, sc, "concrete")
+    masks.mark_ground(ground)
+    sc["rw_dirt"], sc["rw_dust"], sc["rw_age"] = 0.8, 0.8, 0.6
+    return sc
+
+
+@pytest.mark.parametrize("mode,view", CASES)
+def test_mask_parity(yard, out_dir, mode, view):
+    sc = yard
     imgs = {}
     for eng in ("CYCLES", "BLENDER_EEVEE"):
         v, cov = ru.preview(sc, mode, os.path.join(out_dir, "parity_{}_{}".format(mode, eng)), *VIEWS[view],

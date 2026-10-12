@@ -39,8 +39,8 @@ def _centre(img, frac=0.2):
 def wall_scene(empty_scene):
     sc = empty_scene
     ms.camera_light(sc)
-    sc.realworn.dirt = 0.3
-    sc.realworn.dust = 0.0
+    sc["rw_dirt"] = 0.3
+    sc["rw_dust"] = 0.0
     return sc
 
 
@@ -73,16 +73,6 @@ def test_facing_fade_no_stretching(wall_scene, out_dir):
     assert rg < 0.03
 
 
-def test_decal_inherits_wetness_and_dirt(wall_scene, out_dir):
-    _wall(wall_scene)
-    decals.place(wall_scene, "poster_01.png", (0, -0.15, 1.2), (0, -1, 0), size=0.9)
-    dry = _centre(_front(wall_scene, out_dir, "decal_dry"))
-    wall_scene.realworn.wetness = 0.7
-    wet = _centre(_front(wall_scene, out_dir, "decal_wet"))
-    print("\n[inherit] decal brightness dry {:.3f}, wet {:.3f}".format(float(dry.mean()), float(wet.mean())))
-    assert wet.mean() < dry.mean() - 0.02
-
-
 def test_grime_decal_is_channel_only(wall_scene, out_dir):
     _wall(wall_scene, color=(0.5, 0.5, 0.5))
     base = _centre(_front(wall_scene, out_dir, "grime_none"))
@@ -105,27 +95,6 @@ def test_damage_decal_reveals_underlayer(wall_scene, out_dir):
     assert blue(hit) < blue(base) - 0.05  # paint chipped away to primer/steel inside the decal
     mat = bpy.data.materials["WallMat"]
     assert mat.node_tree.nodes["RW::decal_nrm.0"].image.name.startswith("bullet_01_nrm")
-
-
-def test_auto_leaks_under_overhangs(empty_scene):
-    sc = empty_scene
-    wall = ms.wall_with_window(sc, material=ms.principled("Plaster", (0.6, 0.6, 0.58), roughness=0.9))
-    weathering.apply_object(wall, sc, "concrete")
-    made, rep = decals.auto_leaks(sc, [wall], seed=3, spacing=0.8)
-    assert made, rep
-    normals = [decals.projection_normal(e) for e in made]
-    assert all(abs(n.z) < 0.1 for n in normals)  # leaks run down vertical faces
-    under_sill = [e for e in made if abs(e.location.x) < 0.75 and e.location.z < 1.0
-                  and decals.projection_normal(e).y < -0.9]
-    print("\n[leaks] {} decals, {} under the window sill".format(len(made), len(under_sill)))
-    assert under_sill
-    assert all(e["rw_decal_mode"] == "GRIME" for e in made)
-    assert len(decals.material_decals(wall.data.materials[0])) <= naming.MAX_DECALS_PER_MATERIAL
-    # seeded: same seed, same layout
-    locs = sorted(tuple(round(c, 4) for c in e.location) for e in made)
-    decals.remove_all_decals()
-    again, _ = decals.auto_leaks(sc, [wall], seed=3, spacing=0.8)
-    assert sorted(tuple(round(c, 4) for c in e.location) for e in again) == locs
 
 
 def test_decal_limit_per_material(wall_scene):

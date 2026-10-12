@@ -2,7 +2,7 @@ from realworn.core import naming
 
 
 def test_all_attribute_names_use_prefix():
-    for n in (naming.ATTR_EDGE, naming.ATTR_CAVITY, naming.ATTR_CONTACT, naming.ATTR_SHELTER,
+    for n in (naming.ATTR_EDGE, naming.ATTR_CAVITY, naming.ATTR_CONTACT,
               naming.ATTR_DAMAGE, naming.ATTR_PAINT) + naming.SCENE_PROPS + naming.OBJECT_PROPS:
         assert n.startswith("rw_"), n
 

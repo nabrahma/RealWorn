@@ -1,8 +1,8 @@
-"""Paint override (W4): rw_paint corner colour, R adds wear, B removes layers 2-6, G keeps dry."""
+"""Paint override (W4): rw_paint corner colour, R adds wear, B removes layers 2-6."""
 
 from . import masks, naming
 
-CHANNEL_COLORS = {"ADD": (1.0, 0.0, 0.0), "REMOVE": (0.0, 0.0, 1.0), "DRY": (0.0, 1.0, 0.0)}
+CHANNEL_COLORS = {"ADD": (1.0, 0.0, 0.0), "REMOVE": (0.0, 0.0, 1.0)}
 
 
 def ensure(mesh):
@@ -24,7 +24,7 @@ def fill(mesh, rgb, vertex_filter=None):
 
 
 def set_brush(tool_settings, channel):
-    """Red brush adds wear, blue removes it, green keeps dry; Ctrl paints black (clears)."""
+    """Red brush adds wear, blue removes it; Ctrl paints black (clears)."""
     ups = tool_settings.vertex_paint.unified_paint_settings
     ups.use_unified_color = True
     ups.color = CHANNEL_COLORS[channel]

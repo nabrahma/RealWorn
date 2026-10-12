@@ -1,4 +1,4 @@
-"""Projector decals (DEC-1..DEC-10) and Auto Leaks (DEC-8).
+"""Projector decals (DEC-1..DEC-10). (Auto Leaks was removed in v2 P0.)
 
 A decal is an Empty (cube display) named RW_Decal_<image>. Every material of every object
 inside its box gets an RW_L_Decal layer that projects through Texture Coordinate > Object of
@@ -7,11 +7,8 @@ its decal chain is rebuilt from that list, so the order is stable and removal is
 """
 
 import json
-import math
 import os
-import random
 
-import bmesh
 import bpy
 from mathutils import Matrix, Vector
 
@@ -403,82 +400,3 @@ def on_depsgraph_update(scene, depsgraph):
 
 
 # ------------------------------------------------------------- auto leaks
-def _overhang_edges(ob):
-    """(world midpoint, outward side normal, height above base, protrusion) for edges where a top face
-    meets a side face that continues downward (DEC-8), plus drip edges of downward faces."""
-    bm = bmesh.new()
-    bm.from_mesh(ob.data)
-    bm.transform(ob.matrix_world)
-    bm.normal_update()
-    base_z = min((v.co.z for v in bm.verts), default=0.0)
-    # main plane offset per horizontal facing direction (area-weighted median), so protruding
-    # ledges (sills, cornices) can be ranked above plain wall tops
-    planes = {}
-    for f in bm.faces:
-        if abs(f.normal.z) < 0.3:
-            key = (round(f.normal.x, 1), round(f.normal.y, 1))
-            planes.setdefault(key, []).append((f.calc_center_median().dot(f.normal), f.calc_area()))
-    main = {}
-    for key, vals in planes.items():
-        vals.sort()
-        half, acc = sum(a for _, a in vals) / 2.0, 0.0
-        for off, a in vals:
-            acc += a
-            if acc >= half:
-                main[key] = off
-                break
-    out = []
-    for e in bm.edges:
-        if len(e.link_faces) != 2 or not e.is_convex:
-            continue
-        f1, f2 = e.link_faces
-        lo_z = min(v.co.z for v in e.verts)
-        for top, side in ((f1, f2), (f2, f1)):
-            if abs(side.normal.z) >= 0.3:
-                continue
-            side_below = side.calc_center_median().z < lo_z + 1e-4
-            drip = top.normal.z < -0.7 and not side_below and lo_z > base_z + 0.25  # an overhang, not a base
-            if (top.normal.z > 0.7 and side_below) or drip:
-                mid = (e.verts[0].co + e.verts[1].co) / 2.0
-                d = (e.verts[1].co - e.verts[0].co).normalized()
-                n = Vector((side.normal.x, side.normal.y, 0.0)).normalized()
-                key = (round(side.normal.x, 1), round(side.normal.y, 1))
-                protrude = side.calc_center_median().dot(side.normal) - main.get(key, 0.0)
-                out.append((mid.copy(), n, mid.z - base_z, protrude))
-                break
-    bm.free()
-    return out
-
-
-def auto_leaks(scene, objects, seed=0, spacing=1.5, image="leak_01.png", max_per_object=6):
-    """Spawn Grime-mode leak decals below overhangs, sills and parapets. Returns (empties, report)."""
-    rng = random.Random(seed)
-    made, rep, skipped = [], [], 0
-    for ob in objects:
-        cands = _overhang_edges(ob)
-        rng.shuffle(cands)
-        cands.sort(key=lambda c: c[3] <= 0.02)  # protruding ledges first, then the rest (stable)
-        accepted = []
-        for p, n, room, _protrude in cands:
-            if room < 0.2:  # too close to the object's base for a visible run
-                continue
-            gap = spacing * (0.6 + 0.8 * rng.random())
-            if all((p - q).length > gap or n.dot(m) < 0.9 for q, m, _ in accepted):
-                accepted.append((p, n, room))
-            if len(accepted) >= max_per_object:
-                break
-        for p, n, room in accepted:
-            run = min(rng.uniform(0.3, 1.5), room)  # never runs below the object's base
-            width = rng.uniform(0.25, 0.55) * min(spacing, 1.0)
-            loc = p - Vector((0, 0, run / 2.0))
-            empty, r = place(scene, image, loc, n, size=width, mode="GRIME", height=run, depth=0.6,
-                             opacity=rng.uniform(0.6, 1.0))
-            if not empty["rw_targets"]:
-                skipped += 1
-                delete_decal(empty)
-                continue
-            rep += [x for x in r if x[0] != "INFO"]
-            made.append(empty)
-    if skipped:
-        rep.append(("WARNING", "{} leak(s) skipped (decal limit or nothing weathered)".format(skipped)))
-    return made, rep

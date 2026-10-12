@@ -16,7 +16,6 @@ _ATTR_FOR_MODE = {
     "EDGE": naming.ATTR_EDGE,
     "CAVITY": naming.ATTR_CAVITY,
     "CONTACT": naming.ATTR_CONTACT,
-    "SHELTER": naming.ATTR_SHELTER,
 }
 
 

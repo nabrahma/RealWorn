@@ -1,7 +1,7 @@
 """PropertyGroups for scene, object and material state, plus add-on preferences.
 
-Scene and object values are mirrored into custom properties (rw_*) by update callbacks;
-shaders read those through Attribute nodes, so no drivers are needed.
+Object values are mirrored into custom properties (rw_*) by update callbacks; shaders read
+those through Attribute nodes, so no drivers are needed.
 """
 
 import bpy
@@ -21,9 +21,6 @@ PREVIEW_ITEMS = [
     ("EDGE", "Edge", "rw_edge convex edge mask"),
     ("CAVITY", "Cavity", "rw_cavity concave mask"),
     ("CONTACT", "Contact", "rw_contact ground contact mask"),
-    ("SHELTER", "Shelter", "rw_shelter: covered by an occluder"),
-    ("PUDDLE", "Puddle", "Final puddle mask"),
-    ("WETNESS", "Wetness", "Effective wetness w"),
     ("DUST", "Dust", "Final dust mask"),
     ("GRIME", "Grime", "Contact and splash grime mask"),
     ("STREAK", "Streak", "Vertical streak mask"),
@@ -46,25 +43,14 @@ DECAL_MODE_ITEMS = [
 RES_ITEMS = [(str(r), str(r), "") for r in (256, 512, 1024, 2048, 4096)]
 
 
-def _sync_scene(self, context):
-    from .core import weather
-    weather.sync_scene(self.id_data)
-
-
-def _sync_ground_z(self, context):
-    from .core import weather
-    weather.update_ground_z(self.id_data)
-    weather.sync_scene(self.id_data)
-
-
 def _set_preview(self, context):
     from .core import preview
     preview.set_preview(self.id_data, self.mask_preview)
 
 
 def _sync_object(self, context):
-    from .core import weather
-    weather.sync_object(self.id_data)
+    from .core import weathering
+    weathering.sync_object(self.id_data)
 
 
 def _sync_sources(self, context):
@@ -78,22 +64,6 @@ def _decal_items(self, context):
 
 
 class RW_SceneProps(bpy.types.PropertyGroup):
-    age: FloatProperty(name="Age", min=0.0, max=1.0, default=0.4, update=_sync_scene,
-                       description="Edge wear spread and rust amount for every weathered material")
-    dirt: FloatProperty(name="Dirt", min=0.0, max=1.0, default=0.4, update=_sync_scene,
-                        description="Cavity dirt, contact and splash grime")
-    dust: FloatProperty(name="Dust", min=0.0, max=1.0, default=0.2, update=_sync_scene,
-                        description="Dust on upward-facing surfaces (none where wet)")
-    wetness: FloatProperty(name="Wetness", min=0.0, max=1.0, default=0.0, update=_sync_scene,
-                           description="0 dry, 0.35 damp, 0.7 wet, above 0.6 puddles form on ground objects")
-    rain: BoolProperty(name="Rain", default=False, update=_sync_scene,
-                       description="Animated ripples in puddles, droplets and active streaks")
-    splash_height: FloatProperty(name="Splash Height", min=0.0, max=3.0, default=0.4, subtype="DISTANCE",
-                                 update=_sync_scene, description="Height of splash grime and moisture climb")
-    ground_z_auto: BoolProperty(name="Auto Ground Z", default=True, update=_sync_ground_z,
-                                description="Use the lowest ground object's minimum Z")
-    ground_z: FloatProperty(name="Ground Z", default=0.0, subtype="DISTANCE", update=_sync_scene,
-                            description="Reference height for splash grime and moisture climb")
     preset: EnumProperty(name="Preset", items=PRESET_ITEMS, default="AUTO",
                          description="Preset used by Apply")
     mask_preview: EnumProperty(name="Mask Preview", items=PREVIEW_ITEMS, default="NONE", update=_set_preview,
@@ -102,7 +72,6 @@ class RW_SceneProps(bpy.types.PropertyGroup):
     decal_image: EnumProperty(name="Decal", items=_decal_items, description="Decal image from the library")
     decal_mode: EnumProperty(name="Mode", items=DECAL_MODE_ITEMS, default="FULL")
     decal_size: FloatProperty(name="Size", min=0.01, max=20.0, default=0.6, subtype="DISTANCE")
-    leak_seed: IntProperty(name="Seed", default=0, min=0)
     # Damage defaults for Add Damage
     dmg_strength: FloatProperty(name="Strength", min=0.0, max=1.0, default=0.5)
     dmg_seed: IntProperty(name="Seed", default=0, min=0)
@@ -130,7 +99,6 @@ class RW_ObjectProps(bpy.types.PropertyGroup):
     cavity_source: EnumProperty(name="Cavity Source", items=CAVITY_SOURCE_ITEMS, default="ATTRIBUTE",
                                 update=_sync_sources)
     is_ground: BoolProperty(name="Ground", default=False)
-    is_occluder: BoolProperty(name="Occluder", default=False)
 
 
 class RW_MaterialProps(bpy.types.PropertyGroup):

@@ -1,13 +1,7 @@
-"""Application handlers: re-sync on load, end Mask Preview on save, decal upkeep."""
+"""Application handlers: end Mask Preview on save, decal upkeep."""
 
 import bpy
 from bpy.app.handlers import persistent
-
-
-@persistent
-def _on_load(_dummy):
-    from .core import weather
-    weather.resync_all()
 
 
 @persistent
@@ -31,7 +25,6 @@ def _on_depsgraph(scene, depsgraph):
 
 
 _HANDLERS = (
-    (bpy.app.handlers.load_post, _on_load),
     (bpy.app.handlers.save_pre, _on_save_pre),
     (bpy.app.handlers.depsgraph_update_post, _on_depsgraph),
 )

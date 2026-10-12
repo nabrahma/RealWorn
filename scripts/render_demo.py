@@ -38,7 +38,7 @@ def main():
     if assets.asset_stale():
         assets.build_asset_file()
     from fixtures import make_scenes as ms
-    from realworn.core import weather, weathering
+    from realworn.core import masks, weathering
     bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
     scene = bpy.context.scene
     if a.scene == "props":
@@ -54,13 +54,11 @@ def main():
         for o in [floor] + obs:
             weathering.apply_object(o, scene)
         for g in grounds:
-            weather.mark_ground(g, scene)
-        if a.scene == "alley":
-            weather.mark_occluder(d["roof"])
+            masks.mark_ground(g)
         timings["apply_s"] = time.perf_counter() - t
         for kv in a.set:
             k, v = kv.split("=")
-            setattr(scene.realworn, k, type(getattr(scene.realworn, k))(float(v) if v not in ("True", "False") else v == "True"))
+            scene["rw_" + k] = float(v)  # age / dirt / dust (fixed scene values of the v0.7 stack)
     if a.cam:
         from mathutils import Vector
         cam = scene.camera

@@ -1,4 +1,4 @@
-"""3D Viewport sidebar tab "RealWorn": scene-wide first, then per-object, then tools."""
+"""3D Viewport sidebar tab "RealWorn": per-object first, then tools."""
 
 import bpy
 
@@ -9,33 +9,6 @@ class _Base:
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "RealWorn"
-
-
-class RW_PT_scene(_Base, bpy.types.Panel):
-    bl_label = "Scene Weather"
-    bl_idname = "RW_PT_scene"
-
-    def draw(self, context):
-        p = context.scene.realworn
-        lay = self.layout
-        col = lay.column(align=True)
-        for prop in ("age", "dirt", "dust", "wetness"):
-            col.prop(p, prop, slider=True)
-        lay.prop(p, "rain", icon="MOD_FLUIDSIM")
-        col = lay.column(align=True)
-        col.prop(p, "splash_height")
-        row = col.row(align=True)
-        row.prop(p, "ground_z_auto", text="Auto Ground Z")
-        sub = row.row(align=True)
-        sub.enabled = not p.ground_z_auto
-        sub.prop(p, "ground_z", text="")
-        row = lay.row(align=True)
-        row.operator("realworn.mark_ground", icon="VIEW_PERSPECTIVE").state = True
-        row.operator("realworn.mark_ground", text="", icon="X").state = False
-        row = lay.row(align=True)
-        row.operator("realworn.mark_occluder", icon="MOD_SOLIDIFY").state = True
-        row.operator("realworn.mark_occluder", text="", icon="X").state = False
-        lay.operator("realworn.scene_preset", text="Rainy Night", icon="OUTLINER_OB_LIGHT").preset = "RAINY_NIGHT"
 
 
 class RW_PT_object(_Base, bpy.types.Panel):
@@ -75,7 +48,9 @@ class RW_PT_object(_Base, bpy.types.Panel):
         row = lay.row(align=True)
         row.operator("realworn.paint_wear", text="Paint Wear", icon="BRUSH_DATA").channel = "ADD"
         row.operator("realworn.paint_wear", text="", icon="REMOVE").channel = "REMOVE"
-        row.operator("realworn.paint_wear", text="", icon="MOD_FLUIDSIM").channel = "DRY"
+        row = lay.row(align=True)
+        row.operator("realworn.mark_ground", icon="VIEW_PERSPECTIVE").state = True
+        row.operator("realworn.mark_ground", text="", icon="X").state = False
         shared = [m for m in weathering.materials_of(ob) if m.users > 1]
         if shared:
             box = lay.box()
@@ -124,9 +99,6 @@ class RW_PT_decals(_Base, bpy.types.Panel):
         op.mode, op.size = p.decal_mode, p.decal_size
         op = row.operator("realworn.decal_place", text="At Cursor", icon="PIVOT_CURSOR")
         op.use_cursor, op.mode, op.size = True, p.decal_mode, p.decal_size
-        row = lay.row(align=True)
-        row.operator("realworn.decal_auto_leaks", icon="MOD_OCEAN")
-        row.prop(p, "leak_seed", text="Seed")
         lay.operator("realworn.decal_cleanup", icon="BRUSH_DATA")
 
 
@@ -199,7 +171,7 @@ class RW_PT_debug(_Base, bpy.types.Panel):
             row.operator("realworn.rebuild_assets", icon="NODETREE")
 
 
-_classes = (RW_PT_scene, RW_PT_object, RW_PT_mask_settings, RW_PT_decals, RW_PT_damage, RW_PT_bake, RW_PT_debug)
+_classes = (RW_PT_object, RW_PT_mask_settings, RW_PT_decals, RW_PT_damage, RW_PT_bake, RW_PT_debug)
 
 
 def register():

@@ -11,8 +11,8 @@ import pytest
 import render_util as ru
 from fixtures import make_scenes as ms
 from perf_log import record
-from realworn.core import (bake, damage, decals, injector, naming, nodeutil, scene_presets, snapshot,
-                           validate, weather, weathering)
+from realworn.core import (bake, damage, decals, injector, masks, naming, nodeutil, snapshot, validate,
+                           weathering)
 
 
 def _uv_cube(scene, name="UVCube", size=1.0, loc=(0, 0, 0.5), color=(0.1, 0.25, 0.5)):
@@ -28,7 +28,7 @@ def test_bake_swap_and_restore(empty_scene, out_dir):
     ob = _uv_cube(sc)
     ms.camera_light(sc, cam_loc=(2.2, -2.4, 1.8), target=(0, 0, 0.45))
     weathering.apply_object(ob, sc, "painted_metal")
-    sc.realworn.age = 0.9
+    sc["rw_age"] = 0.9
     ru.setup(sc, samples=16, res=(128, 128))
     live = ru.render(sc, os.path.join(out_dir, "bake_live.png"))
     mat = ob.data.materials[0]
@@ -37,7 +37,7 @@ def test_bake_swap_and_restore(empty_scene, out_dir):
     dt = time.perf_counter() - t
     record("Bake one object, 256 px, 9 images (CPU)", dt, "s", None)
     assert set(imgs) == {"base_color", "roughness", "metallic", "normal", naming.ATTR_EDGE, naming.ATTR_CAVITY,
-                         naming.ATTR_CONTACT, naming.ATTR_SHELTER, naming.ATTR_DAMAGE}
+                         naming.ATTR_CONTACT, naming.ATTR_DAMAGE}
     for key, img in imgs.items():
         assert os.path.exists(bpy.path.abspath(img.filepath_raw)), key
     import numpy as np
@@ -76,14 +76,15 @@ def test_baked_render_overhead(empty_scene, out_dir):
     obs = [_uv_cube(sc, "B%d" % i, 0.8, ((i % 3) * 1.1 - 1.1, (i // 3) * 1.1, 0.4)) for i in range(6)]
     ms.camera_light(sc, cam_loc=(3.5, -4.0, 3.0), target=(0, 0.5, 0.3))
     ru.setup(sc, samples=64, res=(480, 480))
-    clean = min(_timed_render(sc, os.path.join(out_dir, "ovh_clean.png")) for _ in range(2))
+    # renders take ~0.6 s, so take the best of 3 to keep background load out of the ratio
+    clean = min(_timed_render(sc, os.path.join(out_dir, "ovh_clean.png")) for _ in range(3))
     for o in obs:
         weathering.apply_object(o, sc, "painted_metal")
-    live = min(_timed_render(sc, os.path.join(out_dir, "ovh_live.png")) for _ in range(2))
+    live = min(_timed_render(sc, os.path.join(out_dir, "ovh_live.png")) for _ in range(3))
     for o in obs:
         bake.bake_object(o, sc, resolution=256, folder=os.path.join(out_dir, "bake"), masks=False)
     ru.setup(sc, samples=64, res=(480, 480))
-    baked = min(_timed_render(sc, os.path.join(out_dir, "ovh_baked.png")) for _ in range(2))
+    baked = min(_timed_render(sc, os.path.join(out_dir, "ovh_baked.png")) for _ in range(3))
     ov_live, ov_baked = (live - clean) / clean * 100, (baked - clean) / clean * 100
     print("\n[overhead] clean {:.2f} s, live {:.2f} s (+{:.0f}%), baked {:.2f} s (+{:.0f}%)".format(
         clean, live, ov_live, baked, ov_baked))
@@ -104,31 +105,12 @@ def test_validate_scene(empty_scene):
     floor, obs = ms.demo_props(sc)
     for o in [floor] + obs:
         weathering.apply_object(o, sc)
-    weather.mark_ground(floor, sc)
+    masks.mark_ground(floor)
     issues = validate.validate(sc)
     assert not [i for i in issues if i[0] == "ERROR"], issues
     stray = ms.principled("Stray")
     nodeutil.new(stray.node_tree, "ShaderNodeValue", "leftover")
     assert any("orphan" in m for _, m in validate.validate(sc))
-
-
-def test_rainy_night_preset(empty_scene, out_dir):
-    sc = empty_scene
-    d = ms.demo_alley(sc)
-    for o in [d["floor"], d["kerb"]] + d["walls"] + d["crates"]:
-        weathering.apply_object(o, sc)
-    made = scene_presets.rainy_night(sc)
-    assert sc.realworn.wetness == pytest.approx(0.85) and sc.realworn.rain
-    assert sc.world.name == "RW_RainyNight" and sc.world.node_tree.nodes.get("Principled Volume")
-    assert sc.compositing_node_group is not None and sc.render.use_compositing
-    kinds = {n.bl_idname for n in sc.compositing_node_group.nodes}
-    assert {"CompositorNodeGlare", "CompositorNodeEllipseMask", "ShaderNodeTexNoise"} <= kinds
-    assert bpy.data.objects.get("RW_Night_Sodium") and bpy.data.objects.get("RW_Night_Neon")
-    ru.setup(sc, engine="BLENDER_EEVEE", samples=16, res=(320, 180))
-    sc.view_settings.view_transform = "AgX"
-    img = ru.render(sc, os.path.join(out_dir, "rainy_night.png"))
-    print("\n[rainy night] {} ; mean brightness {:.3f}".format(made, float(img.mean())))
-    assert 0.01 < img.mean() < 0.6  # a night image: dark but not black
 
 
 def test_twenty_apply_tweak_remove_cycles(empty_scene):
@@ -141,10 +123,7 @@ def test_twenty_apply_tweak_remove_cycles(empty_scene):
     for i in range(20):
         for o in meshes:
             weathering.apply_object(o, sc, ("AUTO", "concrete", "painted_metal", "wood")[i % 4])
-        weather.mark_ground(d["floor"], sc)
-        weather.mark_occluder(d["roof"])
-        sc.realworn.wetness = (i % 5) / 4.0
-        sc.realworn.rain = bool(i % 2)
+        masks.mark_ground(d["floor"])
         for o in meshes:
             weathering.update_object(o, sc, "plastic" if i % 3 == 0 else None)
         if i % 4 == 0:

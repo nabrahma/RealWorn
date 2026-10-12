@@ -8,7 +8,7 @@ import pytest
 
 from fixtures import make_scenes as ms
 from perf_log import record
-from realworn.core import damage, masks, naming, weather, weathering
+from realworn.core import damage, masks, naming, weathering
 
 
 def _evaluated(ob, depsgraph=None):
@@ -37,7 +37,7 @@ def setup(empty_scene):
                         material=ms.principled("BlockMat", (0.55, 0.53, 0.5), roughness=0.85))
     weathering.apply_object(floor, sc, "concrete")
     weathering.apply_object(box, sc, "concrete")
-    weather.mark_ground(floor, sc)
+    masks.mark_ground(floor)
     return sc, floor, box
 
 

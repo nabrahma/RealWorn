@@ -10,23 +10,22 @@ LOG_PREFIX = "[RealWorn]"
 ATTR_EDGE = "rw_edge"
 ATTR_CAVITY = "rw_cavity"
 ATTR_CONTACT = "rw_contact"
-ATTR_SHELTER = "rw_shelter"
 ATTR_DAMAGE = "rw_damage"
 ATTR_PAINT = "rw_paint"          # corner-domain byte color, painted by the user
 ATTR_CUT = "rw_cut"              # internal: cutter faces inside RW_Damage
 ATTR_CORNER = "rw_corner"        # internal: corner cutter points inside RW_Damage
-MASK_ATTRS = (ATTR_EDGE, ATTR_CAVITY, ATTR_CONTACT, ATTR_SHELTER)
+MASK_ATTRS = (ATTR_EDGE, ATTR_CAVITY, ATTR_CONTACT)
 
-# Scene custom properties, read by shaders through Attribute (View Layer).
+# Scene custom properties, read by the v0.7 stack through Attribute (View Layer). The scene
+# weather sliders are gone (v2 P0); these hold fixed defaults until the v2 layer stack lands.
 SC_AGE = "rw_age"
 SC_DIRT = "rw_dirt"
 SC_DUST = "rw_dust"
-SC_WETNESS = "rw_wetness"
-SC_RAIN = "rw_rain"
 SC_GROUND_Z = "rw_ground_z"
 SC_SPLASH = "rw_splash_height"
 SC_PREVIEW = "rw_preview"
-SCENE_PROPS = (SC_AGE, SC_DIRT, SC_DUST, SC_WETNESS, SC_RAIN, SC_GROUND_Z, SC_SPLASH, SC_PREVIEW)
+SCENE_PROPS = (SC_AGE, SC_DIRT, SC_DUST, SC_GROUND_Z, SC_SPLASH, SC_PREVIEW)
+SCENE_DEFAULTS = {SC_AGE: 0.4, SC_DIRT: 0.4, SC_DUST: 0.2, SC_GROUND_Z: 0.0, SC_SPLASH: 0.4, SC_PREVIEW: 0.0}
 
 # Object custom properties, read by shaders through Attribute (Object).
 OB_SEED = "rw_seed"
@@ -36,10 +35,7 @@ OB_GROUND = "rw_is_ground"
 OBJECT_PROPS = (OB_SEED, OB_WEAR, OB_DIRT, OB_GROUND)
 
 # Mask preview codes (scene property rw_preview).
-PREVIEW_CODES = {
-    "NONE": 0, "EDGE": 1, "CAVITY": 2, "CONTACT": 3, "SHELTER": 4, "PUDDLE": 5, "WETNESS": 6,
-    "DUST": 7, "GRIME": 8, "STREAK": 9,
-}
+PREVIEW_CODES = {"NONE": 0, "EDGE": 1, "CAVITY": 2, "CONTACT": 3, "DUST": 7, "GRIME": 8, "STREAK": 9}
 
 # Node groups.
 GN_MASKS = "RW_Masks"
@@ -53,16 +49,13 @@ SH_L_DECALS = "RW_L_DecalApply"
 SH_L_CAVITY = "RW_L_CavityDirt"
 SH_L_GRIME = "RW_L_Grime"
 SH_L_DUST = "RW_L_Dust"
-SH_L_WET = "RW_L_Wetness"
-SH_L_WET_DRY = "RW_L_WetnessDry"
-SH_L_WET_RAIN = "RW_L_WetnessRain"
 SH_DECAL = "RW_L_Decal"
 SH_DECAL_PROJECT = "RW_DecalProject"
 SH_BEVEL_EDGE = "RW_BevelEdge"
 SH_RAY_CAVITY = "RW_RayCavity"
 ALL_GROUPS = (
     GN_MASKS, GN_DAMAGE, SH_BREAKUP, SH_SHADING_MASKS, SH_L_EDGE, SH_L_RUST, SH_L_DECALS,
-    SH_L_CAVITY, SH_L_GRIME, SH_L_DUST, SH_L_WET, SH_L_WET_DRY, SH_L_WET_RAIN, SH_STACK, SH_DECAL, SH_DECAL_PROJECT,
+    SH_L_CAVITY, SH_L_GRIME, SH_L_DUST, SH_STACK, SH_DECAL, SH_DECAL_PROJECT,
     SH_BEVEL_EDGE, SH_RAY_CAVITY,
 )
 
@@ -72,12 +65,10 @@ MOD_DAMAGE = "RW_Damage"
 
 # Collections.
 COLL_GROUND = "RW_Ground"
-COLL_OCCLUDERS = "RW_Occluders"
 COLL_DECALS = "RW_Decals"
 
 # Nodes inserted into user materials.
 NODE_PREFIX = "RW::"
-STACK_WET_NODE = "wetness"  # node name of the wetness group inside RW_Stack
 OWNED_PROP = "rw_owned"
 FRAME_LABEL = "RealWorn"
 DECAL_PREFIX = "RW_Decal_"

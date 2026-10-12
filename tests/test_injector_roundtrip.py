@@ -119,7 +119,7 @@ def test_presets_change_stack_values(empty_scene):
     assert st.inputs["Polish"].default_value == 1.0
     injector.apply(m, "concrete")
     assert st.inputs["Polish"].default_value == 0.0
-    assert st.inputs["Porosity"].default_value == pytest.approx(0.8)
+    assert st.inputs["Rust"].default_value == pytest.approx(0.0)
 
 
 def test_auto_preset_rule(empty_scene):

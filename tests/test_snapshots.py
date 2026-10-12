@@ -10,7 +10,7 @@ import pytest
 
 import render_util as ru
 from fixtures import make_scenes as ms
-from realworn.core import decals, weather, weathering
+from realworn.core import masks, weathering
 
 SNAP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "snapshots")
 THRESHOLD = 0.01
@@ -20,22 +20,11 @@ def _props(sc):
     floor, obs = ms.demo_props(sc)
     for o in [floor] + obs:
         weathering.apply_object(o, sc)
-    weather.mark_ground(floor, sc)
-    sc.realworn.age, sc.realworn.dirt = 0.7, 0.6
+    masks.mark_ground(floor)
+    sc["rw_age"], sc["rw_dirt"] = 0.7, 0.6
 
 
-def _alley_wet(sc):
-    d = ms.demo_alley(sc)
-    for o in [d["floor"], d["kerb"]] + d["walls"] + [d["roof"]] + d["crates"]:
-        weathering.apply_object(o, sc)
-    weather.mark_ground(d["floor"], sc)
-    weather.mark_occluder(d["roof"])
-    decals.auto_leaks(sc, d["walls"], seed=2)
-    sc.realworn.wetness, sc.realworn.rain = 0.9, True
-    sc.frame_set(1)
-
-
-@pytest.mark.parametrize("name,build", [("props_dry", _props), ("alley_wet", _alley_wet)])
+@pytest.mark.parametrize("name,build", [("props_dry", _props)])
 def test_snapshot(empty_scene, out_dir, name, build):
     build(empty_scene)
     ru.setup(empty_scene, samples=16, res=(256, 144))

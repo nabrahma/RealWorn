@@ -7,7 +7,7 @@ import bpy
 
 import render_util as ru
 from fixtures import make_scenes as ms
-from realworn.core import damage, decals, weather, weathering
+from realworn.core import damage, decals, masks, weathering
 
 RENDER_EXPR = (
     "import bpy, sys; sc = bpy.context.scene; "
@@ -21,11 +21,9 @@ def test_renders_without_addon(empty_scene, out_dir):
     floor, obs = ms.demo_props(sc)
     for o in [floor] + obs:
         weathering.apply_object(o, sc)
-    weather.mark_ground(floor, sc)
+    masks.mark_ground(floor)
     decals.place(sc, "poster_01.png", (0.3, 0.09, 0.6), (0, -1, 0), size=0.5)
     damage.add_damage(bpy.data.objects["BevelCube"], sc, {"Strength": 0.6})
-    sc.realworn.wetness = 0.8
-    sc.realworn.rain = True
     sc.frame_set(7)
     ru.setup(sc, samples=16, res=(200, 112))
     path = os.path.join(out_dir, "indep.blend")

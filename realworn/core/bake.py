@@ -2,7 +2,7 @@
 
 Base Color, Roughness and Metallic come from EMIT bakes of the RW_Stack outputs, Normal from a
 tangent-space NORMAL bake of the final shader, and the masks (rw_edge, rw_cavity, rw_contact,
-rw_shelter, rw_damage) from EMIT bakes of Attribute nodes. Swap then feeds the Principled BSDF
+rw_damage) from EMIT bakes of Attribute nodes. Swap then feeds the Principled BSDF
 from the baked images; Restore Live Stack relinks the stack. Everything inserted is RealWorn-
 owned, so Remove still restores the original material exactly.
 """
@@ -17,7 +17,7 @@ from . import injector, naming, nodeutil, weathering
 
 CHANNELS = (("base_color", "Base Color", "sRGB"), ("roughness", "Roughness", "Non-Color"),
             ("metallic", "Metallic", "Non-Color"))
-MASKS = (naming.ATTR_EDGE, naming.ATTR_CAVITY, naming.ATTR_CONTACT, naming.ATTR_SHELTER, naming.ATTR_DAMAGE)
+MASKS = (naming.ATTR_EDGE, naming.ATTR_CAVITY, naming.ATTR_CONTACT, naming.ATTR_DAMAGE)
 BAKE_KEY = "rw_bake_images"
 
 
