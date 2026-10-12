@@ -76,6 +76,13 @@ def _ground(self, context):
     masks.mark_ground(self.id_data, self.is_ground, sync_prop=False)
 
 
+def _grunge_look(self, context):
+    from .core import grunge
+    ts = context.tool_settings if context else None
+    if ts is not None and ts.image_paint is not None:
+        grunge.set_texture_look(ts.image_paint.brush, self.grunge_contrast, self.grunge_invert)
+
+
 def _decal_items(self, context):
     from .core import decals
     return decals.library_enum_items()
@@ -226,6 +233,9 @@ class RW_SceneProps(bpy.types.PropertyGroup):
                                   description="Copy the object's UV map into RW_Paint instead of Smart UV Project")
     grunge_image: EnumProperty(name="Grunge", items=_grunge_items)
     grunge_mode: EnumProperty(name="Mode", items=GRUNGE_MODE_ITEMS, default="STAMP")
+    grunge_contrast: FloatProperty(name="Contrast", default=1.0, min=0.0, max=5.0, update=_grunge_look,
+                                   description="Grunge contrast (brush texture, or the Fill ingredient)")
+    grunge_invert: BoolProperty(name="Invert", default=False, update=_grunge_look)
     decal_image: EnumProperty(name="Decal", items=_decal_items, description="Decal image from the library")
     decal_mode: EnumProperty(name="Mode", items=DECAL_MODE_ITEMS, default="FULL")
     decal_size: FloatProperty(name="Size", min=0.01, max=20.0, default=0.6, subtype="DISTANCE")

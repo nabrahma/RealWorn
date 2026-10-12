@@ -114,10 +114,26 @@ def ensure_brush(name="RW Soft", mode="TEXTURE_PAINT", image=None, map_mode=None
     return b
 
 
+def _in_paint_mode():
+    vl = bpy.context.view_layer
+    ob = vl.objects.active if vl is not None else None
+    return ob is not None and ob.mode in ("TEXTURE_PAINT", "VERTEX_PAINT")
+
+
+def chosen_brush(scene=None):
+    scene = scene or bpy.context.scene
+    return scene.get("rw_brush", "RW Soft")
+
+
 def activate_brush(brush):
     """Brushes are assets in 5.x: tool settings' brush is read-only, asset_activate sets it
-    (spike v2 c). Returns True on success."""
+    (spike v2 c). Only valid while an object is in a paint mode: outside one, Blender 5.2.1
+    dereferences null in WM_toolsystem_activate_brush_and_tool (crash found in P3). The choice is
+    remembered on the scene and Paint Enter activates it. Returns True when activated now."""
     from . import ctx
+    bpy.context.scene["rw_brush"] = brush.name
+    if not _in_paint_mode():
+        return False
     try:
         with bpy.context.temp_override(**ctx.override()):
             r = bpy.ops.brush.asset_activate(asset_library_type="LOCAL", asset_library_identifier="",
@@ -125,3 +141,76 @@ def activate_brush(brush):
         return "FINISHED" in r
     except (RuntimeError, TypeError):
         return False
+
+
+# ------------------------------------------------------------- grunge use
+MAP_FOR_MODE = {"STAMP": "RANDOM", "PROJECTED": "VIEW_PLANE", "STENCIL": "STENCIL"}
+BRUSH_FOR_MODE = {"STAMP": "RW Grunge", "PROJECTED": "RW Grunge", "STENCIL": "RW Cracks"}
+
+
+def _path(name):
+    for n, p in library():
+        if n == name or os.path.splitext(n)[0] == name:
+            return p
+    if os.path.isabs(name) and os.path.exists(name):
+        return name
+    raise KeyError("grunge '{}' not in the library".format(name))
+
+
+def load(name):
+    """The grunge image (Non-Color, reused if already loaded)."""
+    path = _path(name)
+    for img in bpy.data.images:
+        if img.filepath and os.path.normcase(bpy.path.abspath(img.filepath)) == os.path.normcase(path):
+            return img
+    img = bpy.data.images.load(path, check_existing=True)
+    img.colorspace_settings.name = "Non-Color"
+    img["rw_grunge"] = True
+    return img
+
+
+def set_texture_look(brush, contrast=1.0, invert=False):
+    """GRN-7 grunge contrast and invert, applied to RealWorn's own brush texture only."""
+    tex = brush.mask_texture if brush is not None else None
+    if tex is None or not brush.name.startswith("RW "):
+        return False
+    tex.contrast = contrast
+    tex.use_color_ramp = bool(invert)
+    if invert:
+        els = tex.color_ramp.elements
+        els[0].position, els[0].color = 0.0, (1.0, 1.0, 1.0, 1.0)
+        els[-1].position, els[-1].color = 1.0, (0.0, 0.0, 0.0, 1.0)
+    return True
+
+
+def use(mode, name, obj=None, mat=None, layer=None, contrast=1.0, invert=False, amount=1.0, scale=1.0):
+    """Apply grunge `name` in `mode`:
+    STAMP     brush Texture Mask with Random mapping and random angle (GRN-2)
+    PROJECTED brush Texture Mask with View Plane mapping (GRN-3)
+    STENCIL   brush Texture Mask with Stencil mapping, centred in the 3D View (GRN-4)
+    FILL      the layer's Grunge Fill ingredient (GRN-5)
+    Returns the brush (stamp / projected / stencil) or the ingredient (fill)."""
+    img = load(name)
+    if mode == "FILL":
+        from . import compiler
+        with compiler.batch(mat):
+            ing = next((i for i in layer.ingredients if i.kind == "GRUNGE"), None) or layer.ingredients.add()
+            ing.kind = "GRUNGE"
+            ing.image = img
+            ing.amount = amount
+            ing.scale = scale
+            ing.contrast = max(-1.0, min(1.0, contrast - 1.0))
+            ing.invert = invert
+        compiler.compile(mat)
+        return ing
+    brush = ensure_brush(BRUSH_FOR_MODE[mode], image=img, map_mode=MAP_FOR_MODE[mode])
+    set_texture_look(brush, contrast, invert)
+    if mode == "STENCIL":
+        from . import ctx
+        win, screen, area, region = ctx.window_area()
+        if region is not None:
+            brush.mask_stencil_pos = (region.width / 2.0, region.height / 2.0)
+            side = min(region.width, region.height) * 0.35
+            brush.mask_stencil_dimension = (side, side)
+    activate_brush(brush)
+    return brush

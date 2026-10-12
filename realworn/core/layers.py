@@ -26,6 +26,17 @@ def _unique_name(mat, base):
     return "{} {}".format(base, i)
 
 
+def _suggested_grunge(kind):
+    """Tinted Grunge default image: the type's suggestion (Rust: rust spots), if the library has it."""
+    from . import grunge
+    sug = LT.TYPES[kind].get("suggest", "")
+    name = sug.split(":", 1)[1] if sug.startswith("GRUNGE:") else "grime_clouds"
+    try:
+        return grunge.load(name)
+    except KeyError:
+        return None
+
+
 def apply_defaults(layer, kind):
     d = LT.defaults(kind)
     layer.type = kind
@@ -37,6 +48,8 @@ def apply_defaults(layer, kind):
         c.blend = dc["blend"]
         if ch == "color":
             c.color = dc["value"]
+            if dc["source"] == "TINTED_GRUNGE" and c.grunge is None:
+                c.grunge = _suggested_grunge(kind)
         else:
             c.value = dc["value"]
     for k in ("use_height_blend", "height_blend", "lock_source", "lock_strength", "threshold", "softness"):

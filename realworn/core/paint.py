@@ -108,8 +108,7 @@ def enter(obj, mat, layer, target="MASK", mask_view=False):
             bpy.ops.object.mode_set(mode="TEXTURE_PAINT")
     ip.mode = "IMAGE"
     ip.canvas = img
-    if not grunge.activate_brush(grunge.ensure_brush("RW Soft")):
-        pass  # headless without a paint mode keymap: the canvas and colours are still set
+    grunge.activate_brush(grunge.ensure_brush(grunge.chosen_brush()))
     set_mode(obj, "PAINT")
     if mask_view and target == "MASK" and not mat.realworn.mask_view:
         mat.realworn.mask_view = True

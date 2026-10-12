@@ -237,9 +237,14 @@ def draw_brush(layout, context, mat, layer):
     row = col.row(align=True)
     opx(row, "realworn.mask_fill", icon="SNAP_FACE").value = 1.0
     opx(row, "realworn.mask_fill", text="Clear", icon="X").value = 0.0
-    layout.template_icon_view(sp, "grunge_image", show_labels=True, scale=4.0, scale_popup=5.0)
-    layout.prop(sp, "grunge_mode", expand=True)
-    opx(layout, "realworn.grunge_select", icon="TEXTURE")
+    box = layout.box()
+    box.label(text="Grunge", icon="TEXTURE")
+    box.template_icon_view(sp, "grunge_image", show_labels=True, scale=4.0, scale_popup=5.0)
+    box.prop(sp, "grunge_mode", expand=True)
+    r = box.row(align=True)
+    r.prop(sp, "grunge_contrast", slider=True)
+    r.prop(sp, "grunge_invert", toggle=True)
+    opx(box, "realworn.grunge_select", icon="CHECKMARK")
     ts = context.tool_settings
     ups = ts.image_paint.unified_paint_settings if ts and ts.image_paint else None
     brush = ts.image_paint.brush if ts and ts.image_paint else None
