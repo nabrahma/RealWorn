@@ -232,6 +232,8 @@ class RW_MaterialProps(bpy.types.PropertyGroup):
     owner: StringProperty(name="Object", default="")
     mask_view: BoolProperty(name="Mask View", default=False, update=_struct,
                             description="Show the active layer's final mask as greyscale")
+    view_channel: EnumProperty(name="View", items=[("MASK", "Mask", ""), ("COLOR", "Colour", "")], default="MASK",
+                               update=_struct, description="Internal: Mask View shows the mask or the layer colour")
     baked: BoolProperty(name="Baked", default=False)
 
 

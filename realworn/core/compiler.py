@@ -51,17 +51,20 @@ def ensure_group(mat):
     g = st.stack
     if g is None:
         g = bpy.data.node_groups.new(naming.stack_group_name(mat.name), "ShaderNodeTree")
-        for name, stype, default in naming.STACK_INPUTS:
+        g["rw_stack_for"] = mat.name
+        g[naming.OWNED_PROP] = True
+        st.stack = g
+    have = {(i.name, i.in_out) for i in g.interface.items_tree if i.item_type == "SOCKET"}
+    for name, stype, default in naming.STACK_INPUTS:  # also upgrades stacks from older versions
+        if (name, "INPUT") not in have:
             s = g.interface.new_socket(name, in_out="INPUT", socket_type=SOCKET_TYPES[stype])
             if default is None:
                 s.hide_value = True
             else:
                 s.default_value = default
-        for name, stype in naming.STACK_OUTPUTS:
+    for name, stype in naming.STACK_OUTPUTS:
+        if (name, "OUTPUT") not in have:
             g.interface.new_socket(name, in_out="OUTPUT", socket_type=SOCKET_TYPES[stype])
-        g["rw_stack_for"] = mat.name
-        g[naming.OWNED_PROP] = True
-        st.stack = g
     return g
 
 
@@ -285,6 +288,7 @@ def apply_content(b, layer, mask, cur, ctx):
             b.links.new(val, var.inputs["Color"])
             val = b.outp(var, "Color")
         blend = layer.color.blend if layer.color.blend in ("MIX", "MULTIPLY", "OVERLAY", "ADD", "DARKEN") else "MIX"
+        b.layer_color = val
         cur["Base Color"] = b.mix(mask, cur["Base Color"], val, blend=blend)
     for name, key in (("roughness", "Roughness"), ("metallic", "Metallic")):
         ch = getattr(layer, name)
@@ -333,13 +337,14 @@ def compile(mat):
     base_height = cur["Height"]
     cur["Height"] = None  # layer height accumulator (mm); None until a layer adds height
     ctx = {"height_used": False, "flatten": None, "displacement": None, "coverage": None, "mask_view": None,
-           "base_height": base_height, "geometry_normal": None}
+           "layer_color": None, "base_height": base_height, "geometry_normal": None}
     masks = {}
     active = mat.realworn.active_layer_index
     for idx, layer in enumerate(mat.realworn.layers):
         if not layer.visible:
             continue
         b.begin(layer.id)
+        b.layer_color = None
         decal_alpha = None
         if layer.type == "DECAL":
             from . import decals
@@ -365,6 +370,8 @@ def compile(mat):
             ctx["coverage"] = mask if ctx["coverage"] is None else b.max(ctx["coverage"], mask)
             if mat.realworn.mask_view and idx == active:
                 ctx["mask_view"] = mask
+                if mat.realworn.view_channel == "COLOR":  # bake helpers read the layer's own colour
+                    ctx["layer_color"] = getattr(b, "layer_color", None)
         b.end(300 * (idx + 1))
     b.begin("stack")
     normal = cur["Normal"]
@@ -379,10 +386,11 @@ def compile(mat):
     out = dict(cur)
     out["Normal"] = normal
     for name, _ in naming.STACK_OUTPUTS:
-        if name in ("Displacement", "Coverage", "Mask View"):
+        if name in ("Displacement", "Coverage", "Mask View", "Layer Color"):
             continue
         b.links.new(out[name], go.inputs[name])
-    for name, key in (("Displacement", "displacement"), ("Coverage", "coverage"), ("Mask View", "mask_view")):
+    for name, key in (("Displacement", "displacement"), ("Coverage", "coverage"), ("Mask View", "mask_view"),
+                      ("Layer Color", "layer_color")):
         if ctx[key] is not None:
             b.links.new(ctx[key], go.inputs[name])
     b.end(300 * (len(mat.realworn.layers) + 1))

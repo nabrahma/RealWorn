@@ -329,9 +329,10 @@ class RW_PT_tools(_Base, bpy.types.Panel):
         lay.prop(p, "decal_mode", expand=True)
         lay.prop(p, "decal_size")
         row = lay.row(align=True)
-        op = opx(row, "realworn.decal_place", text="Place Decal", icon="RESTRICT_SELECT_OFF")
-        op = opx(row, "realworn.decal_place", text="At Cursor", icon="PIVOT_CURSOR")
-        op.use_cursor = True
+        for cursor in (False, True):
+            op = opx(row, "realworn.decal_place", text="At Cursor" if cursor else "Place Decal",
+                     icon="PIVOT_CURSOR" if cursor else "RESTRICT_SELECT_OFF")
+            op.use_cursor, op.mode, op.size = cursor, p.decal_mode, p.decal_size
         row = lay.row(align=True)
         row.operator("realworn.mark_ground", icon="VIEW_PERSPECTIVE").state = True
         row.operator("realworn.mark_ground", text="", icon="X").state = False

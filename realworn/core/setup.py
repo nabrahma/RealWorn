@@ -239,6 +239,8 @@ def remove_object(obj, delete_images=True):
     damage.remove_geometry(obj)
     damage.remove_subdiv(obj)
     images = mask_images(obj) if delete_images else []
+    empties = {ly.decal.empty for m in materials_of(obj) for ly in m.realworn.layers
+               if ly.type == "DECAL" and ly.decal.empty is not None}
     for m in materials_of(obj):
         if injector.is_setup(m):
             diffs = injector.restore(m)
@@ -279,6 +281,13 @@ def remove_object(obj, delete_images=True):
     for img in images:
         if img.users == 0 or (img.users == 1 and img.use_fake_user):
             bpy.data.images.remove(img)
+    for e in empties:  # projector Empties no other layer uses any more
+        if not any(ly.type == "DECAL" and ly.decal.empty == e for m in bpy.data.materials if m.realworn.applied
+                   for ly in m.realworn.layers):
+            bpy.data.objects.remove(e)
+    coll = bpy.data.collections.get(naming.COLL_DECALS)
+    if coll is not None and not coll.objects:
+        bpy.data.collections.remove(coll)
     if naming.OB_SETUP in obj:
         del obj[naming.OB_SETUP]
     return rep

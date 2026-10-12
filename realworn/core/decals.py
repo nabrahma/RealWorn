@@ -283,6 +283,7 @@ def apply_content(b, layer, mask, cur, ctx):
     col = ctx.pop("decal_color", None)
     if col is None:
         return
+    b.layer_color = col
     darken = b.value_node("decal.darken", d.darken)
     lum = b.lum(col)
     if d.mode == "FULL" and layer.color.enabled:
@@ -334,3 +335,46 @@ def on_depsgraph_update(scene, depsgraph):
             ob = bpy.data.objects.get(idb.name)
             if ob is not None:
                 update_normal(ob)
+
+
+# ------------------------------------------------------ DEC-5 bake to layer
+def bake_into_layer(obj, mat, layer, scene=None):
+    """Project the decal (with its painted tears) into the layer's own colour image, turn it into a
+    Paint layer and delete the Empty when no other layer still uses it."""
+    from . import bake, compiler, images, layers as L
+    scene = scene or bpy.context.scene
+    if layer.type != "DECAL" or layer.decal.empty is None:
+        raise DecalError("not a placed decal layer")
+    idx = L.index_of(mat, layer.id)
+    res = layer.mask_res or images.texel_resolution(obj)
+    tmp_c = bake.new_image("rw_tmp_decal_color", res, "Non-Color")
+    tmp_a = bake.new_image("rw_tmp_decal_alpha", res, "Non-Color")
+    try:
+        bake.bake_layer_view(scene, obj, mat, idx, "COLOR", tmp_c)
+        bake.bake_layer_view(scene, obj, mat, idx, "MASK", tmp_a)
+        layer = mat.realworn.layers[idx]
+        content = images.create_mask(obj, layer, res=res, kind="content")
+        bake.compose_rgba(tmp_c, tmp_a, content)
+        images.store(content, obj)
+    finally:
+        for t in (tmp_c, tmp_a):
+            bpy.data.images.remove(t)
+    empty = layer.decal.empty
+    old_mask = layer.mask_image
+    with compiler.batch(mat):
+        layer.type = "PAINT"
+        layer.content_image = content
+        layer.mask_image = None
+        layer.decal.empty = None
+        layer.decal.image = None
+        layer.decal.normal_image = None
+        layer.color.enabled, layer.color.color, layer.color.source = True, (1.0, 1.0, 1.0), "FLAT"
+        layer.threshold, layer.softness = 0.5, 1.0
+    compiler.compile(mat)
+    if old_mask is not None and old_mask.users == 0:
+        bpy.data.images.remove(old_mask)
+    still = any(ly.type == "DECAL" and ly.decal.empty == empty for m in bpy.data.materials if m.realworn.applied
+                for ly in m.realworn.layers)
+    if empty is not None and not still:
+        bpy.data.objects.remove(empty)
+    return layer

@@ -296,7 +296,8 @@ def set_mask_view(mat, state):
             emis = nodeutil.new(tree, "ShaderNodeEmission", "maskview", frame=nodeutil.ensure_frame(tree))
             x, y = _abs(out)
             _place(emis, x, y + 200)
-        tree.links.new(st[0].outputs["Mask View"], emis.inputs["Color"])
+        tree.links.new(st[0].outputs["Layer Color" if mat.realworn.view_channel == "COLOR" else "Mask View"],
+                       emis.inputs["Color"])
         tree.links.new(emis.outputs[0], out.inputs["Surface"])
         return True
     if emis is None:
