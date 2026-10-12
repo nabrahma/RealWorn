@@ -1,6 +1,11 @@
-"""Builders: Python that creates every RealWorn node group (source of truth)."""
+"""Builders: Python that creates every RealWorn node group (source of truth).
 
-BUILDERS = ()
+Order matters: a group is built after the groups it instances.
+"""
+
+from . import gn_masks
+
+BUILDERS = (gn_masks,)
 
 
 def build_all():
