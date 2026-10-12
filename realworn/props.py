@@ -66,6 +66,11 @@ def _struct(self, context):
     compiler.on_struct(self)
 
 
+def _active_layer(self, context):
+    from .core import compiler
+    compiler.on_active_layer(self)
+
+
 def _ground(self, context):
     from .core import masks
     masks.mark_ground(self.id_data, self.is_ground, sync_prop=False)
@@ -198,7 +203,7 @@ class RW_MaterialProps(bpy.types.PropertyGroup):
     mode: StringProperty(name="Mode", default="", description="CHANNEL or SHADER")
     stack: PointerProperty(name="Stack", type=bpy.types.NodeTree)
     layers: CollectionProperty(type=RWLayer)
-    active_layer_index: IntProperty(name="Layer", default=0)
+    active_layer_index: IntProperty(name="Layer", default=0, update=_active_layer)
     source_material: StringProperty(name="Source Material", default="",
                                     description="Material this one was duplicated from by Setup (SET-3)")
     owner: StringProperty(name="Object", default="")

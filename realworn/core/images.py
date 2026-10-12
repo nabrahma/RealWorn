@@ -19,6 +19,7 @@ import numpy as np
 from . import naming
 
 MIN_RES, MAX_RES = 512, 4096
+FORCE_STORAGE = None  # tests set "PACKED" / "PNG" (preferences are unavailable unregistered)
 
 
 def _prefs():
@@ -78,17 +79,22 @@ def ensure_content(obj, mat, layer):
     return layer.content_image
 
 
-def png_dir(obj_name):
-    return "//textures/realworn/{}/".format(bpy.path.clean_name(obj_name))
-
-
-def store(img, obj=None):
-    """SAV-1: pack (default) or write a PNG next to the .blend. Returns 'packed' / 'saved'."""
+def storage_mode():
+    if FORCE_STORAGE:
+        return FORCE_STORAGE
     p = _prefs()
-    mode = p.mask_storage if p is not None else "PACKED"
-    if mode == "PNG" and bpy.data.filepath:
+    return p.mask_storage if p is not None else "PACKED"
+
+
+def store(img, obj=None, blend_path=None):
+    """SAV-1: pack (default) or write a PNG under //textures/realworn/<object>/ next to the .blend
+    (`blend_path` is the file being saved, so the very first save already writes PNGs).
+    Returns 'packed' or 'saved'."""
+    blend_path = blend_path or bpy.data.filepath
+    if storage_mode() == "PNG" and blend_path:
         owner = (img.get(naming.IMG_MASK) or img.get(naming.IMG_CONTENT) or "realworn/").split("/")[0]
-        folder = bpy.path.abspath(png_dir(owner or (obj.name if obj else "realworn")))
+        owner = owner or (obj.name if obj else "realworn")
+        folder = os.path.join(os.path.dirname(blend_path), "textures", "realworn", bpy.path.clean_name(owner))
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, bpy.path.clean_name(img.name) + ".png")
         try:
@@ -97,22 +103,27 @@ def store(img, obj=None):
             img.filepath_raw = path
             img.file_format = "PNG"
             img.save()
-            img.filepath = bpy.path.relpath(path)
+            img.source = "FILE"
+            img.filepath = "//" + os.path.relpath(path, os.path.dirname(blend_path)).replace("\\", "/")
             return "saved"
-        except RuntimeError:
+        except (RuntimeError, ValueError):
             pass  # fall back to packing (Paint System does the same)
+    if img.packed_file is not None and not img.is_dirty:
+        return "packed"
     img.pack()
     return "packed"
 
 
-def save_all(force=False):
-    """SAV-2: called from save_pre. Packs or writes every dirty RealWorn image."""
+def save_all(blend_path=None, force=False):
+    """SAV-2: called from save_pre with the path being saved. Packs or writes every RealWorn
+    image that has unsaved pixels or no storage yet."""
     done = 0
     for img in bpy.data.images:
         if not is_rw_image(img):
             continue
-        if img.is_dirty or force or (img.packed_file is None and not img.filepath):
-            store(img)
+        unstored = img.packed_file is None and not (img.filepath and os.path.exists(bpy.path.abspath(img.filepath)))
+        if img.is_dirty or force or unstored:
+            store(img, blend_path=blend_path)
             done += 1
     return done
 

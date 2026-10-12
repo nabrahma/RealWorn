@@ -495,11 +495,26 @@ def set_value(mat, path):
     return True
 
 
+def on_active_layer(pg):
+    """Active layer changed: Mask View follows it; painting switches canvas (PRD "While painting")."""
+    mat = pg.id_data
+    if not isinstance(mat, bpy.types.Material) or suspended(mat) or not mat.realworn.applied:
+        return
+    if mat.realworn.mask_view:
+        compile(mat)
+    from . import paint
+    for obj in objects_using(mat):
+        if paint.painting(obj):
+            paint.switch_layer(obj, mat)
+
+
 def on_struct(pg):
     mat = pg.id_data
     if not isinstance(mat, bpy.types.Material) or suspended(mat) or not mat.realworn.applied:
         return
-    if pg == mat.realworn and mat.realworn.mask_view is not None:
+    if pg.path_from_id() == "realworn":  # material-level property (Mask View)
         from . import injector
+        compile(mat)
         injector.set_mask_view(mat, mat.realworn.mask_view)
+        return
     compile(mat)

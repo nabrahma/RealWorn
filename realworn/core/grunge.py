@@ -62,3 +62,66 @@ def free_previews():
         import bpy.utils.previews
         bpy.utils.previews.remove(_previews)
         _previews = None
+
+
+# ------------------------------------------------------------------ brushes
+# GRN-6 / DMG-5: RealWorn's own brush assets, created on first use; user brushes are never edited.
+BRUSHES = {
+    "RW Soft": {"spacing": 10, "strength": 1.0, "falloff": "SMOOTH"},
+    "RW Grunge": {"spacing": 35, "strength": 1.0, "falloff": "SMOOTH", "map": "RANDOM"},
+    "RW Chips": {"spacing": 45, "strength": 1.0, "falloff": "CONSTANT", "map": "RANDOM"},
+    "RW Scratch": {"spacing": 8, "strength": 1.0, "falloff": "SHARP", "map": "VIEW_PLANE"},
+    "RW Dents": {"spacing": 30, "strength": 0.8, "falloff": "SPHERE"},
+    "RW Cracks": {"spacing": 6, "strength": 1.0, "falloff": "SHARP", "map": "STENCIL"},
+}
+_FALLOFF_PRESETS = ("SMOOTH", "SPHERE", "ROOT", "SHARP", "LIN", "POW4", "INVSQUARE", "CONSTANT")
+
+
+def ensure_brush(name="RW Soft", mode="TEXTURE_PAINT", image=None, map_mode=None):
+    """The named RealWorn brush (created and marked as an asset on first use). With `image` the
+    grunge becomes the brush's Texture Mask in `map_mode` (RANDOM / VIEW_PLANE / STENCIL)."""
+    spec = BRUSHES.get(name, BRUSHES["RW Soft"])
+    key = name if mode == "TEXTURE_PAINT" else "{} ({})".format(name, mode.split("_")[0].title())
+    b = bpy.data.brushes.get(key)
+    if b is None:
+        b = bpy.data.brushes.new(key, mode=mode)
+        b.spacing = spec["spacing"]
+        b.strength = spec["strength"]
+        b.blend = "MIX"
+        if spec["falloff"] in _FALLOFF_PRESETS:
+            try:
+                b.curve_distance_falloff_preset = spec["falloff"]
+            except (TypeError, AttributeError):
+                pass
+        b.color = (1.0, 1.0, 1.0)
+        b.secondary_color = (0.0, 0.0, 0.0)
+        b["rw_brush"] = True
+    if b.asset_data is None:
+        b.asset_mark()
+    if image is not None:
+        tex = b.mask_texture
+        if tex is None or tex.type != "IMAGE":
+            tex = bpy.data.textures.new(key + " Mask", type="IMAGE")
+            tex["rw_brush"] = True
+            b.mask_texture = tex
+        tex.image = image
+        slot = b.mask_texture_slot
+        slot.mask_map_mode = map_mode or spec.get("map", "RANDOM")
+        slot.use_random = slot.mask_map_mode == "RANDOM"
+        slot.random_angle = 6.2831853
+    elif map_mode == "NONE" and b.mask_texture is not None:
+        b.mask_texture = None
+    return b
+
+
+def activate_brush(brush):
+    """Brushes are assets in 5.x: tool settings' brush is read-only, asset_activate sets it
+    (spike v2 c). Returns True on success."""
+    from . import ctx
+    try:
+        with bpy.context.temp_override(**ctx.override()):
+            r = bpy.ops.brush.asset_activate(asset_library_type="LOCAL", asset_library_identifier="",
+                                             relative_asset_identifier="Brush" + os.sep + brush.name)
+        return "FINISHED" in r
+    except (RuntimeError, TypeError):
+        return False
