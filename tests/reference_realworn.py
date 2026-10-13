@@ -96,6 +96,12 @@ def realworn_look(wall, upto, skip=()):
         ly.threshold, ly.sharpness = ramp_stops_sliders(R.REVEAL["black"], R.REVEAL["white"])
         ly.edge_dark = 0.0  # REV-6 is RealWorn's one extra over the tutorial
         ly.mask_res = 2048
+    if on("decals"):  # one RGBA image painted with drips: colour into a Principled, alpha as the mask
+        bpy.ops.realworn.layer_add(material=m, kind="DECALS")
+        ly = _layer(mat)
+        ly.decal_res = "2048"
+        ly.roughness = R.DECAL["roughness"]
+        ly.decal_blend = "NORMAL"
     return mat
 
 

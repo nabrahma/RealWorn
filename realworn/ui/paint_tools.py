@@ -84,6 +84,42 @@ class RW_OT_layer_step(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _painting_decal(context):
+    st, mat, layer = _painting_state(context)
+    return layer is not None and layer.kind == "DECALS"
+
+
+class RW_OT_decal_erase_stroke(bpy.types.Operator):
+    """DEC-5: Ctrl + drag on a Decals layer erases alpha (Erase Alpha), so mistakes can be painted
+    out without touching what is underneath. Only active while painting a Decals layer; elsewhere
+    Ctrl + drag keeps Blender's own behaviour (the mask layers paint black)"""
+    bl_idname = "realworn.decal_erase_stroke"
+    bl_label = "Erase Decal"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == "PAINT_TEXTURE" and _painting_decal(context)
+
+    def invoke(self, context, event):
+        brush = context.tool_settings.image_paint.brush
+        if brush is None or not brush.get("rw_brush"):
+            return {"PASS_THROUGH"}
+        self._brush = brush.name
+        brush.blend = "ERASE_ALPHA"
+        bpy.ops.paint.image_paint("INVOKE_DEFAULT", mode="NORMAL")
+        context.window_manager.modal_handler_add(self)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if (event.type == "LEFTMOUSE" and event.value == "RELEASE") or event.type in ("ESC", "RIGHTMOUSE"):
+            b = bpy.data.brushes.get(self._brush)
+            if b is not None:
+                b.blend = "MIX"
+            return {"FINISHED", "PASS_THROUGH"}
+        return {"PASS_THROUGH"}
+
+
 class RW_OT_mask_view_toggle(bpy.types.Operator):
     """Show the selected layer's final mask as greyscale (toggle)"""
     bl_idname = "realworn.mask_view_toggle"
@@ -115,7 +151,7 @@ class RW_MT_paint_pie(bpy.types.Menu):
         pie.operator("realworn.paint_exit", icon="CHECKMARK")
 
 
-_classes = (RW_OT_layer_step, RW_OT_mask_view_toggle, RW_MT_paint_pie)
+_classes = (RW_OT_layer_step, RW_OT_decal_erase_stroke, RW_OT_mask_view_toggle, RW_MT_paint_pie)
 
 
 def register():
@@ -130,6 +166,8 @@ def register():
             km = kc.keymaps.new(name=km_name, space_type="EMPTY")
             kmi = km.keymap_items.new("wm.call_menu_pie", type="NONE", value="PRESS")
             kmi.properties.name = RW_MT_paint_pie.bl_idname
+            _keymaps.append((km, kmi))
+            kmi = km.keymap_items.new(RW_OT_decal_erase_stroke.bl_idname, type="LEFTMOUSE", value="PRESS", ctrl=True)
             _keymaps.append((km, kmi))
 
 

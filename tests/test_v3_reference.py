@@ -102,3 +102,12 @@ def test_r2_up_to_damage(empty_scene, out_dir):
     mat = wall.material_slots[0].material
     assert [ly.kind for ly in mat.realworn.layers][-2:] == ["PAINT", "REVEAL"]
     assert mad < MAD_MAX and block < BLOCK_MAX
+
+
+# ------------------------------------------------------------------ R3
+def test_r3_up_to_decals(empty_scene, out_dir):
+    """Reference comparison up to the decal step (edge wear is R4)."""
+    mad, block, wall = compare_stage(empty_scene, out_dir, "R3", "decals", skip=("edges",))
+    mat = wall.material_slots[0].material
+    assert [ly.kind for ly in mat.realworn.layers][-1] == "DECALS"
+    assert mad < MAD_MAX and block < BLOCK_MAX
