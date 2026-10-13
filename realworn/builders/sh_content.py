@@ -36,9 +36,11 @@ def _common(t):
     tc = t.outp(t.node("ShaderNodeTexCoord"), "Object")
     s = t.I("Scale")
     p = t.vmath("DIVIDE", tc, t.comb(s, s, s))
-    n1 = t.maprange(t.noise(p, 1.0, detail=3.0), 0.3, 0.7, -1.0, 1.0)  # broad patches
-    n2 = t.maprange(t.noise(t.vmath("ADD", p, (5.3, 1.7, 8.1)), 7.0, detail=2.0), 0.3, 0.7, -1.0, 1.0)
-    fine = t.noise(p, 60.0, detail=1.0)  # grit, 0..1
+    # single-octave noises: each octave is a full Perlin evaluation per shading point (and three
+    # when the look's relief feeds the shared bump); measured in docs/milestones/Q4/notes.md
+    n1 = t.maprange(t.noise(p, 1.0, detail=1.0), 0.3, 0.7, -1.0, 1.0)  # broad patches
+    n2 = t.maprange(t.noise(t.vmath("ADD", p, (5.3, 1.7, 8.1)), 7.0, detail=1.0), 0.3, 0.7, -1.0, 1.0)
+    fine = t.noise(p, 60.0, detail=0.0)  # grit, 0..1
     return p, n1, n2, fine
 
 
@@ -78,12 +80,12 @@ def build_type(kind):
         col = t.mix(t.mul(rim, 0.65), col, (*RUST_RIM, 1.0))
         # mottle from noises independent of the grunge: Erode keeps rust where the grunge is light,
         # so the grunge itself is nearly constant across visible rust
-        mid = t.noise(t.vmath("ADD", p, (2.1, 9.4, 4.4)), 18.0, detail=3.0)
+        mid = t.noise(t.vmath("ADD", p, (2.1, 9.4, 4.4)), 18.0, detail=1.0)
         g = t.maprange(t.add(t.mul(fine, 0.5), t.mul(mid, 0.5)), 0.3, 0.7, 0.45, 1.35)
         col = t.mix(1.0, col, t.comb(g, g, g), blend="MULTIPLY")
         height = t.add(t.mul_all(t.sub(t.I("Grunge"), 1.0), micro, 0.15), t.mul_all(t.sub(fine, 0.5), micro, 0.05))
     elif kind == "WEAR":
-        brush = t.noise(t.vmath("MULTIPLY", p, (2.0, 60.0, 60.0)), 1.0, detail=2.0)  # streaks along X
+        brush = t.noise(t.vmath("MULTIPLY", p, (2.0, 60.0, 60.0)), 1.0, detail=1.0)  # streaks along X
         n1 = t.maprange(brush, 0.3, 0.7, -1.0, 1.0)
         n2 = t.mul(n2, 0.3)
         height = t.mul_all(t.sub(brush, 0.5), micro, 0.02)
@@ -91,7 +93,7 @@ def build_type(kind):
         n1 = t.mul(n1, 0.3)
         height = t.mul_all(t.I("Grunge"), micro, -0.03)
     elif kind == "WATER":
-        ripple = t.noise(p, 20.0, detail=2.0)
+        ripple = t.noise(p, 20.0, detail=1.0)
         n1 = t.mul(t.add(n2, 1.0), 0.05)  # roughness only upward, 0.01 .. 0.06
         n2 = t.mul(n2, 0.0)
         height = t.mul_all(t.sub(ripple, 0.5), micro, 0.02)

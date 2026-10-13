@@ -6,8 +6,10 @@ m: the layer's combined mask (after paint-over and ingredients), d: detail 0..1 
 Contrast / Invert), s: Strength, w: Edge Width, t: Threshold, b: interior protection.
 
 RW_P_EdgeErode   e = m - (1 - d) * s * b,                     M = smoothstep(t - w/2, t + w/2, e)
-                 b = lerp(1, clamp((1 - m) * 4), Protect): with Protect on, the solid middle of a
-                 stroke (m = 1) is not eroded, only its boundary breaks up
+                 b = lerp(1, 1 - smoothstep(0.3, 0.7, m), Protect): with Protect on, the core of a
+                 stroke (m >= 0.7) is not eroded, only its boundary breaks up. (The PRD says "where
+                 the mask is fully 1"; real soft or < 100 % strength brushes rarely reach 1, which
+                 left speckled dents in the live check, so the core starts at 0.7.)
 RW_P_EdgeBurn    e = 1 - (1 - m) / max(d, eps) (Color Burn), blended with m by s,
                  M = smoothstep(t - w/2, t + w/2, clamp(e))
 RW_P_EdgeHeight  M = smoothstep(-w/2, w/2, m * s - d - (t - 0.5)) * clamp(m * 20)
@@ -35,7 +37,7 @@ def build_erode():
     t = Tree.new_group(naming.SH_EDGE_ERODE, "SHADER")
     hw = _io(t, protect=True)
     m = t.I("Mask")
-    b = t.mixf(t.I("Protect"), 1.0, t.clamp(t.mul(t.sub(1.0, m), 4.0)))
+    b = t.mixf(t.I("Protect"), 1.0, t.sub(1.0, t.maprange(m, 0.3, 0.7, interp="SMOOTHSTEP")))
     e = t.sub(m, t.mul_all(t.sub(1.0, t.I("Detail")), t.I("Strength"), b))
     th = t.I("Threshold")
     t.O("Mask", t.maprange(e, t.sub(th, hw), t.add(th, hw), interp="SMOOTHSTEP"))

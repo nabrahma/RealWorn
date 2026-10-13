@@ -73,14 +73,14 @@ def t2_stroke(ob, res):
     return su.soft_disk(res, c, 0.05 * k, 0.025 * k)
 
 
-def measure_t2(sc, ob, mat, out_dir, tag, painted_area=False):
+def measure_t2(sc, ob, mat, out_dir, tag, painted_area=False, res=None):
     """W per layer; with painted_area, also the coverage of the same layer with Edge Detail off
     (the plain stroke), so v2.1 can prove the stroke still reads as the stroke."""
     out = {}
     for kind in ("DIRT", "RUST"):
         ly = layers.add_layer(mat, kind, index=len(mat.realworn.layers))
         idx = len(mat.realworn.layers) - 1
-        su.paint_layer(ob, mat, ly, lambda r: t2_stroke(ob, r))
+        su.paint_layer(ob, mat, ly, lambda r: t2_stroke(ob, r), res=res)
         out[kind] = _w(sc, mat, idx, out_dir, "t2_{}_{}".format(tag, kind.lower()))
         if painted_area:
             ly = mat.realworn.layers[idx]
@@ -94,7 +94,7 @@ def measure_t2(sc, ob, mat, out_dir, tag, painted_area=False):
 def test_t2_baseline_closeup_dirt_and_rust(closeup, out_dir):
     sc, ob, mat = closeup
     v20(mat)
-    out = measure_t2(sc, ob, mat, out_dir, "v20")
+    out = measure_t2(sc, ob, mat, out_dir, "v20", res=512)  # v2.0's density gave a 30 cm crate 512 px
     print("\n[T2 v2.0] W px: Dirt {:.1f}, Rust {:.1f} (mask {} px)".format(
         out["DIRT"]["W"], out["RUST"]["W"], mat.realworn.layers[0].mask_image.size[0]))
     for kind in ("DIRT", "RUST"):

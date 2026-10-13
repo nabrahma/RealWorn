@@ -166,8 +166,8 @@ def test_content_height_source_shares_the_channel_lookup(empty_scene):
     g = mat.realworn.stack
     looks = [n for n in g.nodes if n.bl_idname == "ShaderNodeTexImage" and n.image == img]
     assert len(looks) == 1  # one lookup feeds both the height channel and Edge Detail
-    edge = g.nodes[naming.layer_node(ly.id, "edge.contrast")]
-    assert edge.inputs["Value"].links[0].from_node == looks[0]
+    edge = g.nodes[naming.layer_node(ly.id, "edge")]  # contrast 0: the lookup feeds the stage directly
+    assert edge.inputs["Detail"].links[0].from_node == looks[0]
 
 
 # ------------------------------------------------------------------ Second Grunge

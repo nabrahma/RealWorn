@@ -100,19 +100,21 @@ DETAIL = {
     "RUST": _det("ERODE", "LAYER_GRUNGE", 0.8, 0.04, False, "breakup_rust", 0.25),
     "WEAR": _det("ERODE", "LAYER_GRUNGE", 0.8, 0.02, True, "chips_small", 0.2),
     "SCRATCHES": _det("ERODE", "LAYER_GRUNGE", 0.9, 0.02, True, "scratches_fine", 0.3),
-    "WATER": _det("HEIGHT", "BASE_HEIGHT", 0.8, 0.03, False, "smudge", 0.5, "breakup_fine", 0.2),
+    "WATER": _det("HEIGHT", "BASE_HEIGHT", 0.8, 0.03, False, "smudge", 0.5),
     "DAMAGE": _det("ERODE", "BASE_HEIGHT", 0.7, 0.03, True, "chips_small", 0.2),
 }
 
 
-# PRD v2.1 CNT-3: content look defaults (colour and roughness come from the layer's channels)
+# PRD v2.1 CNT-3: content look defaults (colour and roughness come from the layer's channels).
+# Micro relief is on by default only where relief carries the look (Rust pitting, Damage grain):
+# relief joins the shared bump, which re-evaluates the layer's whole mask three times (Q4 notes).
 LOOK = {
-    "DIRT": {"color_var": 0.5, "rough_var": 0.4, "micro": 0.6, "scale": 0.3},
+    "DIRT": {"color_var": 0.5, "rough_var": 0.4, "micro": 0.0, "scale": 0.3},
     "DUST": {"color_var": 0.25, "rough_var": 0.5, "micro": 0.0, "scale": 0.4},
     "RUST": {"color_var": 0.45, "rough_var": 0.5, "micro": 0.8, "scale": 0.25},
-    "WEAR": {"color_var": 0.2, "rough_var": 0.5, "micro": 0.5, "scale": 0.5},
+    "WEAR": {"color_var": 0.2, "rough_var": 0.5, "micro": 0.0, "scale": 0.5},
     "SCRATCHES": {"color_var": 0.1, "rough_var": 0.4, "micro": 0.6, "scale": 0.3},
-    "WATER": {"color_var": 0.0, "rough_var": 0.5, "micro": 0.3, "scale": 0.5},
+    "WATER": {"color_var": 0.0, "rough_var": 0.5, "micro": 0.0, "scale": 0.5},
     "DAMAGE": {"color_var": 0.4, "rough_var": 0.3, "micro": 0.7, "scale": 0.2},
 }
 
@@ -136,7 +138,7 @@ def edge_detail(mode, m, d, s, w, t=0.5, protect=False):
     """Reference (pure Python) of the Edge Detail groups (builders/sh_edge_detail.py)."""
     hw = max(w, 1e-3) / 2.0
     if mode == "ERODE":
-        b = 1.0 + (min(max((1 - m) * 4, 0.0), 1.0) - 1.0) * (1.0 if protect else 0.0)
+        b = 1.0 + ((1.0 - _smoothstep(0.3, 0.7, m)) - 1.0) * (1.0 if protect else 0.0)
         return _smoothstep(t - hw, t + hw, m - (1 - d) * s * b)
     if mode == "BURN":
         burn = min(max(1 - (1 - m) / max(d, 0.02), 0.0), 1.0)

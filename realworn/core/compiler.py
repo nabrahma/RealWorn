@@ -262,8 +262,9 @@ def edge_detail(b, layer, m):
         # a second, smaller breakup on top of any source (two scales of breakup)
         d2 = _grunge(b, "edge2", det.image2, det.scale2, det.rotation, det.offset + 3.7, det.cubic, det.anti_tile)
         d = b.clamp(b.add(d, b.mul(b.sub(d2, 0.5), b.value_node("edge.mix2", det.mix2))))
-    d = b.outp(b.group(naming.SH_CONTRAST, "edge.contrast", Value=d, Contrast=det.contrast,
-                       Invert=1.0 if det.invert else 0.0))
+    if det.contrast != 0.0 or det.invert:  # identity at the defaults: no nodes (lean; bump runs it 3x)
+        d = b.outp(b.group(naming.SH_CONTRAST, "edge.contrast", Value=d, Contrast=det.contrast,
+                           Invert=1.0 if det.invert else 0.0))
     b.detail_d = d  # the content look's Grunge input (CNT-3 Rust pitting, Scratches grooves)
     kw = dict(Mask=m, Detail=d, Strength=det.strength, Width=det.width, Threshold=det.threshold)
     if det.mode == "ERODE":
@@ -686,6 +687,9 @@ def set_value(mat, path):
         elif prop == "protect":
             targets.append(("edge", "Protect", 1.0 if det.protect else 0.0))
         elif prop in ("contrast", "invert"):
+            has = g.nodes.get(naming.layer_node(lid, "edge.contrast")) is not None
+            if has != (det.contrast != 0.0 or det.invert):
+                return False  # leaving or entering the identity adds or removes the group
             targets.append(("edge.contrast", "Contrast" if prop == "contrast" else "Invert",
                             det.contrast if prop == "contrast" else (1.0 if det.invert else 0.0)))
         elif prop in ("scale", "rotation", "offset", "scale2"):

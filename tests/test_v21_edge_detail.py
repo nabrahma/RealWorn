@@ -137,6 +137,7 @@ def test_edg10_values_update_live_structure_recompiles(plate):
     sc, ob, mat = plate
     ly = layers.add_layer(mat, "RUST")
     _paint_disk(ob, mat, ly)
+    ly.detail.contrast = 0.1  # leaving the identity adds the contrast group (structural once)
     edge = mat.realworn.stack.nodes[naming.layer_node(ly.id, "edge")]
     c0 = compiler.COMPILES["count"]
     det = ly.detail
