@@ -29,6 +29,14 @@ def build():
     t.inp("Use Exact", "BOOL", False, description="Exact Boolean solver (slower; for meshes Manifold rejects)")
     t.inp("Debris", "BOOL", False)
     t.inp("Ground", "COLLECTION")
+    bimg = t.t.interface.new_socket("Base Height", in_out="INPUT", socket_type="NodeSocketImage")
+    bimg.description = "v2.1 DMG-14: the base material's height map (cutters follow the carve)"
+    buv = t.t.interface.new_socket("Base UV", in_out="INPUT", socket_type="NodeSocketString")
+    buv.description = "UV map the base height image is mapped with"
+    t.inp("Base Scale", "VECTOR", (1.0, 1.0, 1.0))
+    t.inp("Base Low", "FLOAT", 0.0)
+    t.inp("Base High", "FLOAT", 1.0)
+    t.inp("Follow", "FLOAT", 0.0, 0.0, 1.0)
     t.out("Geometry", "GEO")
 
     geo = t.I("Geometry")
@@ -50,6 +58,16 @@ def build():
     t.links.new(t.gi.outputs["Mask"], tex.inputs["Image"])
     t.links.new(t.outp(uv, "Attribute"), tex.inputs["Vector"])
     painted = t.mul(t.outp(t.node("FunctionNodeSeparateColor", t.outp(tex, "Color")), "Red"), t.outp(tex, "Alpha"))
+    # DMG-14: weight by the same follow-base factor as the shader carve, so real chips appear where
+    # the carve is deepest (base height sampled through its own UV map and Mapping scale)
+    buvn = t.node("GeometryNodeInputNamedAttribute", props={"data_type": "FLOAT_VECTOR"})
+    t.links.new(t.gi.outputs["Base UV"], buvn.inputs["Name"])
+    btex = t.node("GeometryNodeImageTexture", props={"interpolation": "Linear"})
+    t.links.new(t.gi.outputs["Base Height"], btex.inputs["Image"])
+    t.links.new(t.vmath("MULTIPLY", t.outp(buvn, "Attribute"), t.I("Base Scale")), btex.inputs["Vector"])
+    bh = t.maprange(t.outp(t.node("FunctionNodeSeparateColor", t.outp(btex, "Color")), "Red"),
+                    t.I("Base Low"), t.I("Base High"))
+    painted = t.mul(painted, t.mixf(t.I("Follow"), 1.0, t.mul(bh, 2.0)))
     keep_pts = t.compare(painted, t.I("Threshold"), "GREATER_THAN")
     pts = t.outp(dist, "Points")
     normal = t.outp(dist, "Normal")

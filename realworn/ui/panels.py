@@ -208,6 +208,14 @@ def draw_content(layout, mat, layer):
         box = layout.box()
         box.label(text="Damage", icon="MOD_BOOLEAN")
         box.prop(layer.damage, "depth_mode", expand=True)
+        box.row(align=True).prop(layer.damage, "carve", expand=True)
+        if layer.damage.depth_mode == "DISPLACEMENT":
+            from ..core import damage as _dmg
+            ob = bpy.context.active_object
+            rate = _dmg.dicing_rate(ob, bpy.context.scene) if ob is not None else None
+            if rate:
+                box.label(text="Adaptive dicing: " + rate, icon="MOD_SUBSURF")
+            box.prop(layer.damage, "edge_length")
         box.prop(layer.damage, "inner")
         for p in ("depth_mm", "reveal", "rim_height", "rim_width", "rim_brightness", "sharpness"):
             box.prop(layer.damage, p)

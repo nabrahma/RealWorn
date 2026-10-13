@@ -4,6 +4,10 @@ Mask is the Damage layer's final mask. Inside = the crisp interior (Edge Sharpne
 transition); the dent is Depth mm deep inside; the rim is a band just outside the break, raised by
 Rim Height mm and brightened by Rim Brightness. Shader and Displacement modes share these
 values, so switching depth keeps the look.
+
+v2.1 DMG-10 / DMG-11 Follow Base: the carve is scaled by 2 x the normalised base height, so a
+painted patch on bricks loses brick faces (high) before mortar (low) and the break follows the
+bricks. Follow 0 is v2.0's flat carve.
 """
 
 from ..core import naming
@@ -21,6 +25,8 @@ def build():
     t.inp("Rim Brightness", "FLOAT", 0.35, 0.0, 1.0)
     t.inp("Sharpness", "FLOAT", 0.8, 0.0, 1.0)
     t.inp("Reveal", "FLOAT", 0.6, 0.0, 1.0, description="How much of a dent breaks through to the inner material")
+    t.inp("Base Height", "FLOAT", 0.5, 0.0, 1.0, description="Normalised base height (v2.1 Follow Base)")
+    t.inp("Follow", "FLOAT", 0.0, 0.0, 1.0, description="0: flat carve (v2.0); 1: carve follows the base")
     t.out("Height", "FLOAT")
     t.out("Reveal Mask", "FLOAT")
     t.out("Inside", "FLOAT")
@@ -39,7 +45,8 @@ def build():
     bowl = t.maprange(raw, t.mul(rw, 0.6), 1.0, interp="SMOOTHSTEP")
     t.O("Inside", inside)
     t.O("Rim", rim)
-    t.O("Height", t.sub(t.mul(rim, t.I("Rim Height")), t.mul(bowl, t.I("Depth"))))
+    follow = t.mixf(t.I("Follow"), 1.0, t.mul(t.I("Base Height"), 2.0))
+    t.O("Height", t.sub(t.mul(rim, t.I("Rim Height")), t.mul_all(bowl, t.I("Depth"), follow)))
     t.O("Brighten", t.mul(rim, t.I("Rim Brightness")))
     # the inner material shows where the dent is strongest (a hard stroke breaks fully; a soft dent
     # dab only breaks at its centre)

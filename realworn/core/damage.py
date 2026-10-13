@@ -104,9 +104,13 @@ def content_mask(b, layer, mask, ctx):
     """Build the dent group first; the layer's channels (inner material) blend by its Reveal Mask."""
     d = layer.damage
     raw = getattr(b, "raw_mask", None)
+    from . import compiler, detail
+    mat = layer.id_data
+    bh = compiler.base_height_norm(b, mat) if detail.has_base_height(mat) else 0.5
     g = b.group(naming.SH_DAMAGE, "damage", Mask=mask, Raw=raw if raw is not None else mask, Depth=d.depth_mm,
                 Rim_Height=d.rim_height, Rim_Width=d.rim_width, Rim_Brightness=d.rim_brightness,
-                Sharpness=d.sharpness, Reveal=d.reveal)
+                Sharpness=d.sharpness, Reveal=d.reveal, Base_Height=bh,
+                Follow=1.0 if d.carve == "FOLLOW_BASE" else 0.0)
     ctx["damage_group"] = g
     return b.outp(g, "Reveal Mask")
 
@@ -134,6 +138,8 @@ _GEO_INPUTS = {"threshold": "Threshold", "density": "Density", "size_min": "Size
 
 
 def value_targets(layer, prop):
+    if prop == "carve":
+        return [("damage", "Follow", 1.0 if layer.damage.carve == "FOLLOW_BASE" else 0.0)]
     sock = _SHADER_INPUTS.get(prop)
     return [("damage", sock, getattr(layer.damage, prop))] if sock else []
 
@@ -141,6 +147,12 @@ def value_targets(layer, prop):
 def on_value(mat, layer, prop):
     """Geometry-mode values go to the RW_Damage modifier (no shader recompile). Returns True when
     handled, None to fall through to the shader targets."""
+    if prop == "carve":  # the shader carve and the cutters both follow the base
+        from . import compiler
+        for obj in compiler.objects_using(mat):
+            if damage_modifier(obj) is not None:
+                _base_inputs(obj, layer, damage_modifier(obj))
+        return None
     if prop not in _GEO_INPUTS:
         return None
     from . import compiler
@@ -199,6 +211,7 @@ def ensure_geometry(obj, layer):
         masks.set_input(mod, sock, getattr(d, prop))
     ground = masks.ensure_collection(naming.COLL_GROUND)
     masks.set_input(mod, "Ground", None if obj.name in ground.objects else ground)  # no self-cycle
+    _base_inputs(obj, layer, mod)
     return mod
 
 
@@ -220,6 +233,50 @@ def _coarse_guard(obj, layer, levels):
         del layer.damage["rw_warning"]
 
 
+def _base_inputs(obj, layer, mod):
+    """DMG-14: the base height image, its UV map and Mapping scale, and the normalisation."""
+    from . import detail, nodeutil
+    mat = layer.id_data
+    sock = detail.base_height_socket(mat)
+    img = sock.node.image if sock is not None and sock.node.bl_idname == "ShaderNodeTexImage" else None
+    follow = layer.damage.carve == "FOLLOW_BASE" and img is not None
+    uv_name, scale = "", (1.0, 1.0, 1.0)
+    if img is not None:
+        src = nodeutil.link_source(sock.node.inputs["Vector"])
+        if src is not None and src.node.bl_idname == "ShaderNodeMapping":
+            scale = tuple(src.node.inputs["Scale"].default_value)
+            src = nodeutil.link_source(src.node.inputs["Vector"])
+        if src is not None and src.node.bl_idname == "ShaderNodeUVMap" and src.node.uv_map:
+            uv_name = src.node.uv_map
+        elif obj.data.uv_layers.active_render is not None:
+            uv_name = obj.data.uv_layers.active_render.name
+    masks.set_input(mod, "Base Height", img)
+    masks.set_input(mod, "Base UV", uv_name)
+    masks.set_input(mod, "Base Scale", scale)
+    masks.set_input(mod, "Base Low", mat.realworn.base_height_lo)
+    masks.set_input(mod, "Base High", mat.realworn.base_height_hi)
+    masks.set_input(mod, "Follow", 1.0 if follow else 0.0)
+
+
+def is_instanced(obj):
+    """The object's mesh is shared, or a collection it is in is instanced somewhere (DMG-13)."""
+    if obj.data.users > 1:
+        return True
+    colls = set(obj.users_collection)
+    return any(o.instance_type == "COLLECTION" and o.instance_collection in colls for o in bpy.data.objects)
+
+
+def dicing_rate(obj, scene):
+    """DMG-13 readout: the effective dicing (pixel size x scene dicing rate, or edge length)."""
+    mod = subdiv_modifier(obj)
+    if mod is None or not getattr(mod, "use_adaptive_subdivision", False):
+        return None
+    if mod.adaptive_space == "OBJECT":
+        return "{:.1f} mm edges (object space)".format(mod.adaptive_object_edge_length * 1000)
+    rate = mod.adaptive_pixel_size * getattr(getattr(scene, "cycles", None), "dicing_rate", 1.0)
+    return "{:.1f} px (pixel size {:.1f} x dicing rate)".format(rate, mod.adaptive_pixel_size)
+
+
 def ensure_subdiv(obj, viewport_levels=2):
     mod = subdiv_modifier(obj)
     if mod is None:
@@ -230,6 +287,12 @@ def ensure_subdiv(obj, viewport_levels=2):
         mod.show_expanded = False
     if hasattr(mod, "use_adaptive_subdivision"):
         mod.use_adaptive_subdivision = True  # Cycles dices adaptively; EEVEE uses the fixed levels
+        # DMG-13: instanced objects dice in object space (pixel dicing differs per instance)
+        mod.adaptive_space = "OBJECT" if is_instanced(obj) else "PIXEL"
+        lys = [ly for m in obj.data.materials if m is not None for ly in m.realworn.layers
+               if ly.type == "DAMAGE" and ly.damage.depth_mode == "DISPLACEMENT"]
+        if lys:
+            mod.adaptive_object_edge_length = min(ly.damage.edge_length for ly in lys)
     return mod
 
 

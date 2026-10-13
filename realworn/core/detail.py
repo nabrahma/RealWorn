@@ -274,6 +274,8 @@ def apply_defaults(layer, kind):
         lk = layer.look
         lk.enabled = True
         lk.color_var, lk.rough_var, lk.micro, lk.scale = look["color_var"], look["rough_var"], look["micro"], look["scale"]
+    if kind == "DAMAGE":
+        layer.damage.carve = "FOLLOW_BASE"  # DMG-10: v2.1 default
     if kind == "RUST" and layer.color.source == "TINTED_GRUNGE":
         layer.color.source = "FLAT"  # the look does the variation (and the orange rim)
 

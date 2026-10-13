@@ -32,6 +32,8 @@ INGREDIENT_ITEMS = [("GRUNGE", "Grunge Fill", "A grunge image projected over the
 LOCK_ITEMS = [("NONE", "None", "Strokes go exactly where painted"), ("EDGE", "Edge", "Keep paint on convex edges"),
               ("CAVITY", "Cavity", "Keep paint in corners"), ("CONTACT", "Contact", "Keep paint near the ground"),
               ("UP", "Up", "Keep paint on top faces")]
+CARVE_ITEMS = [("FLAT", "Flat", "Fixed depth wherever painted (v2.0)"),
+               ("FOLLOW_BASE", "Follow Base", "Carve the base's high points first: breaks follow bricks, tiles, planks")]
 DEPTH_ITEMS = [("SHADER", "Shader", "Dents through Bump; cheap, both engines"),
                ("DISPLACEMENT", "Displacement", "Real surface depth via material displacement"),
                ("GEOMETRY", "Geometry", "Boolean cutters where painted (RW_Damage)")]
@@ -180,6 +182,11 @@ class RWWater(bpy.types.PropertyGroup):
 
 class RWDamage(bpy.types.PropertyGroup):
     depth_mode: EnumProperty(name="Depth", items=DEPTH_ITEMS, default="SHADER", update=_struct)
+    carve: EnumProperty(name="Carve", items=CARVE_ITEMS, default="FLAT", update=_v("carve"),
+                        description="v2.1 DMG-10: Follow Base makes the break follow the base material")
+    edge_length: FloatProperty(name="Dicing Edge", default=0.002, min=0.0001, soft_max=0.05, subtype="DISTANCE",
+                               update=_struct,
+                               description="Displacement: adaptive dicing edge length in metres (instanced objects)")
     inner: EnumProperty(name="Inner Material", items=INNER_ITEMS, default="CONCRETE", update=_damage_inner)
     depth_mm: FloatProperty(name="Depth (mm)", default=3.0, min=0.0, soft_max=30.0, update=_v("depth_mm"))
     rim_height: FloatProperty(name="Rim Height (mm)", default=0.6, min=0.0, soft_max=5.0, update=_v("rim_height"))
