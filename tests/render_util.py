@@ -22,6 +22,26 @@ def setup(scene, engine="CYCLES", samples=16, res=(128, 128), denoise=False):
         scene.eevee.taa_render_samples = samples
 
 
+def use_gpu(scene):
+    """Render `scene` on the GPU (OptiX, else CUDA). Returns the device name, or None (stays on CPU).
+    Correctness tests stay on CPU: their references were rendered there and CPU is deterministic;
+    performance tests use the GPU the owner renders with."""
+    cp = bpy.context.preferences.addons["cycles"].preferences
+    for kind in ("OPTIX", "CUDA"):
+        try:
+            cp.compute_device_type = kind
+        except TypeError:
+            continue
+        cp.refresh_devices()
+        gpus = [d for d in cp.devices if d.type == kind]
+        if gpus:
+            for d in cp.devices:
+                d.use = d.type == kind
+            scene.cycles.device = "GPU"
+            return "{} {}".format(kind, gpus[0].name)
+    return None
+
+
 def render(scene, path):
     scene.render.filepath = os.path.abspath(path)
     bpy.ops.render.render(write_still=True)

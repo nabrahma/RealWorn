@@ -336,6 +336,15 @@ def swap_to_baked(mat, images_by_key):
                 nt.links.new(nodes[key].outputs["Color"], p.inputs[sock])
         nt.links.new(nmap.outputs["Normal"], p.inputs["Normal"])
         nt.links.new(nmap.outputs["Normal"], p.inputs["Coat Normal"])
+        # Coat IOR is not baked: feed it what fed the stack (water's 1.33 blend is dropped). Leaving
+        # the stack linked here would keep Cycles evaluating every live mask after Bake.
+        src = st.inputs["Coat IOR"]
+        for link in list(p.inputs["Coat IOR"].links):
+            nt.links.remove(link)
+        if src.is_linked:
+            nt.links.new(src.links[0].from_socket, p.inputs["Coat IOR"])
+        else:
+            p.inputs["Coat IOR"].default_value = src.default_value
     mat[BAKED_KEY] = json.dumps({k: img.name for k, img in images_by_key.items()})
     mat.realworn.baked = True
     return True

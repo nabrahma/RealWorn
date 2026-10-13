@@ -373,3 +373,21 @@ def test_group_upgrade_recompiles_stacks(empty_scene):
     assert compiler.COMPILES["count"] > c0
     assert mat.realworn.stack.nodes[naming.layer_node(mat.realworn.layers[0].id, "levels")].node_tree.get(
         "rw_build") == assets.asset_build()
+
+
+def test_duplicate_many_layers_with_ingredients(empty_scene):
+    """Regression: duplicate_layer held a layer reference across layers.add(); once the collection
+    reallocated, copying its ingredients looped forever (stateful suite hang, 12 Oct 2026)."""
+    ob = uv_cube(empty_scene, material=GENERATED["principled_basic"]())
+    setup.setup_object(ob)
+    mat = ob.material_slots[0].material
+    ly = layers.add_layer(mat, "RUST")
+    for kind in ("EDGE", "CAVITY", "UP"):
+        ing = ly.ingredients.add()
+        ing.kind, ing.amount = kind, 0.3
+    for _ in range(24):
+        layers.duplicate_layer(mat, 0)
+    assert len(mat.realworn.layers) == 25
+    assert all([i.kind for i in L.ingredients] == [i.kind for i in mat.realworn.layers[0].ingredients]
+               for L in mat.realworn.layers)
+    assert len({L.id for L in mat.realworn.layers}) == 25

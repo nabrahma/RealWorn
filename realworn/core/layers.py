@@ -165,9 +165,11 @@ def copy_props(src, dst, skip=("id", "name")):
 
 def duplicate_layer(mat, index):
     st = mat.realworn
-    src = st.layers[index]
     with compiler.batch(mat):
         ly = st.layers.add()
+        # add() can reallocate the collection: a reference taken before it may point at freed
+        # memory (seen as an endless loop over its ingredients), so look the source up again
+        src = st.layers[index]
         copy_props(src, ly)
         ly.id = new_id()
         ly.name = _unique_name(mat, src.name)

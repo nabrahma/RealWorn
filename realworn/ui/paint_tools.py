@@ -43,11 +43,16 @@ def _draw_overlay():
     mapping = brush.mask_texture_slot.mask_map_mode.title().replace("_", " ") if tex is not None else "Soft"
     lines = ["RealWorn  {}".format(layer.name), "{}  |  {}".format(mode, mapping)]
     font = 0
-    blf.size(font, 13)
-    x, y = 20, 60
+    scale = context.preferences.system.ui_scale
+    blf.size(font, 13 * scale)
+    # top left, under the view name and object lines: Blender 5's brush asset shelf covers the
+    # bottom of the viewport in paint mode
+    # the toolbar overlaps the viewport (region overlap): start right of it, in line with the view name
+    tools = next((r.width for r in context.area.regions if r.type == "TOOLS"), 0) if context.area else 0
+    x, y = int(tools + 20 * scale), int(context.region.height - 110 * scale)
     for i, text in enumerate(lines):
         blf.color(font, 1.0, 1.0, 1.0, 0.9 if i == 0 else 0.7)
-        blf.position(font, x + (56 if tex is not None else 0), y - i * 18, 0)
+        blf.position(font, x + (56 * scale if tex is not None else 0), y - i * 18 * scale, 0)
         blf.draw(font, text)
     if tex is not None and tex.image is not None:
         try:
@@ -55,9 +60,9 @@ def _draw_overlay():
             from gpu_extras.batch import batch_for_shader
             texture = gpu.texture.from_image(tex.image)
             shader = gpu.shader.from_builtin("IMAGE")
-            s = 46
-            batch = batch_for_shader(shader, "TRI_FAN", {"pos": ((x, y - 26), (x + s, y - 26), (x + s, y + 20),
-                                                                 (x, y + 20)),
+            s = 46 * scale
+            batch = batch_for_shader(shader, "TRI_FAN", {"pos": ((x, y - 26 * scale), (x + s, y - 26 * scale),
+                                                                 (x + s, y + 20 * scale), (x, y + 20 * scale)),
                                                          "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
             shader.bind()
             shader.uniform_sampler("image", texture)
