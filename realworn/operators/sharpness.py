@@ -117,7 +117,78 @@ class RW_OT_pick_ao(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_fix_texture_limit, RW_OT_fix_simplify_textures, RW_OT_fix_anisotropic, RW_OT_apply_v21_defaults,
+class RW_OT_upgrade_masks(bpy.types.Operator):
+    """Resample this object's masks to the current texel density (bicubic, paint kept) and give
+    relief-driving layers 16-bit masks. Undoable"""
+    bl_idname = "realworn.upgrade_masks"
+    bl_label = "Upgrade Masks"
+    bl_options = {"REGISTER", "UNDO"}
+
+    object: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        import time
+        from ..core import images, setup
+        ob = bpy.data.objects.get(self.object) if self.object else context.active_object
+        if ob is None or not setup.is_setup(ob):
+            self.report({"WARNING"}, "Select a set-up object")
+            return {"CANCELLED"}
+        t = time.perf_counter()
+        n = 0
+        for mat in setup.layered_materials(ob):
+            for ly in mat.realworn.layers:
+                before = ly.mask_image
+                if before is None:
+                    continue
+                size, was_float = tuple(before.size), before.is_float
+                new = images.upgrade(ob, ly)
+                if tuple(new.size) != size or new.is_float != was_float:
+                    n += 1
+        self.report({"INFO"}, "Upgraded {} mask(s) to {} px in {:.2f} s".format(
+            n, images.texel_resolution(ob), time.perf_counter() - t))
+        return {"FINISHED"}
+
+
+class RW_OT_hero_toggle(bpy.types.Operator):
+    """Hero object: masks at 4096 px per metre for extreme close-ups. Shows the memory the masks
+    will take before you confirm"""
+    bl_idname = "realworn.hero_toggle"
+    bl_label = "Hero Masks"
+    bl_options = {"REGISTER", "UNDO"}
+
+    object: bpy.props.StringProperty(default="")
+    upgrade: bpy.props.BoolProperty(name="Upgrade existing masks now", default=True)
+
+    def _obj(self, context):
+        return bpy.data.objects.get(self.object) if self.object else context.active_object
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        from ..core import images, setup
+        ob = self._obj(context)
+        if ob is None:
+            return
+        lys = [ly for m in setup.layered_materials(ob) for ly in m.realworn.layers]
+        target = not ob.realworn.hero
+        b, res = images.memory_estimate(ob, lys, hero=target)
+        col = self.layout.column()
+        col.label(text="Hero {}: masks at {} px".format("on" if target else "off", res))
+        col.label(text="{} layer(s): about {:.0f} MB of RAM".format(len(lys), b / 1024 / 1024))
+        col.prop(self, "upgrade")
+
+    def execute(self, context):
+        ob = self._obj(context)
+        if ob is None:
+            return {"CANCELLED"}
+        ob.realworn.hero = not ob.realworn.hero
+        if self.upgrade:
+            bpy.ops.realworn.upgrade_masks(object=ob.name)
+        return {"FINISHED"}
+
+
+_classes = (RW_OT_upgrade_masks, RW_OT_hero_toggle, RW_OT_fix_texture_limit, RW_OT_fix_simplify_textures, RW_OT_fix_anisotropic, RW_OT_apply_v21_defaults,
             RW_OT_refresh_base, RW_OT_pick_ao)
 
 

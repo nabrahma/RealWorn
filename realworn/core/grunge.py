@@ -68,6 +68,7 @@ def free_previews():
 # GRN-6 / DMG-5: RealWorn's own brush assets, created on first use; user brushes are never edited.
 BRUSHES = {
     "RW Soft": {"spacing": 10, "strength": 1.0, "falloff": "SMOOTH"},
+    "RW Hard": {"spacing": 8, "strength": 1.0, "falloff": "CONSTANT"},  # v2.1 RES-5
     "RW Grunge": {"spacing": 35, "strength": 1.0, "falloff": "SMOOTH", "map": "RANDOM"},
     "RW Chips": {"spacing": 45, "strength": 1.0, "falloff": "CONSTANT", "map": "RANDOM"},
     "RW Scratch": {"spacing": 8, "strength": 1.0, "falloff": "SHARP", "map": "VIEW_PLANE"},
@@ -120,18 +121,29 @@ def _in_paint_mode():
     return ob is not None and ob.mode in ("TEXTURE_PAINT", "VERTEX_PAINT")
 
 
-def chosen_brush(scene=None):
+HARD_TYPES = ("WEAR", "SCRATCHES", "DAMAGE")  # RES-5: hard by default; Edge Detail softens nothing
+
+
+def default_brush(kind):
+    """RES-5: RW Hard for Wear, Scratches and Damage; RW Soft for the rest (Edge Detail now
+    supplies the crisp edge for Dirt, Dust and Water)."""
+    return "RW Hard" if kind in HARD_TYPES else "RW Soft"
+
+
+def chosen_brush(scene=None, kind=None):
+    """The brush the user picked last (remembered on the scene), else the layer type's default."""
     scene = scene or bpy.context.scene
-    return scene.get("rw_brush", "RW Soft")
+    return scene.get("rw_brush") or default_brush(kind)
 
 
-def activate_brush(brush):
+def activate_brush(brush, remember=True):
     """Brushes are assets in 5.x: tool settings' brush is read-only, asset_activate sets it
     (spike v2 c). Only valid while an object is in a paint mode: outside one, Blender 5.2.1
     dereferences null in WM_toolsystem_activate_brush_and_tool (crash found in P3). The choice is
     remembered on the scene and Paint Enter activates it. Returns True when activated now."""
     from . import ctx
-    bpy.context.scene["rw_brush"] = brush.name
+    if remember:
+        bpy.context.scene["rw_brush"] = brush.name
     if not _in_paint_mode():
         return False
     try:

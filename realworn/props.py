@@ -338,6 +338,9 @@ class RW_MaterialProps(bpy.types.PropertyGroup):
 class RW_ObjectProps(bpy.types.PropertyGroup):
     is_ground: BoolProperty(name="Ground", default=False, update=_ground,
                             description="Contact generators measure distance to ground objects")
+    hero: BoolProperty(name="Hero", default=False,
+                       description="Hero object: masks at 4096 px per metre (2048..8192 px) for extreme close-ups; "
+                                   "Upgrade Masks resamples existing paint")
 
 
 class RW_SceneProps(bpy.types.PropertyGroup):
@@ -368,7 +371,7 @@ class RW_Preferences(bpy.types.AddonPreferences):
     mask_storage: EnumProperty(name="Mask Storage", items=[
         ("PACKED", "Packed in .blend", "Masks live inside the .blend file (default)"),
         ("PNG", "PNG Files", "Masks are saved under //textures/realworn/<object>/")], default="PACKED")
-    texel_density: IntProperty(name="Texel Density", default=1024, min=64, max=8192,
+    texel_density: IntProperty(name="Texel Density", default=2048, min=64, max=8192,
                                description="Mask pixels per metre of the object's largest dimension")
     grunge_folder: StringProperty(name="Grunge Folder", subtype="DIR_PATH", default="",
                                   description="Extra folder of black and white grunge images")

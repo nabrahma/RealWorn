@@ -443,6 +443,11 @@ class RW_PT_sharpness(_Base, bpy.types.Panel):
         from ..core import diagnostics
         lay = self.layout
         ob, mat = _context_material(context)
+        row = lay.row(align=True)
+        h = opx(row, "realworn.hero_toggle", text="Hero: On" if ob.realworn.hero else "Hero: Off",
+                icon="SOLO_ON" if ob.realworn.hero else "SOLO_OFF", depress=ob.realworn.hero)
+        h.object = ob.name
+        opx(row, "realworn.upgrade_masks", icon="IMAGE_REFERENCE").object = ob.name
         found = diagnostics.check(context.preferences.system, context.scene, setup.materials_of(ob))
         if not found:
             lay.label(text="No settings limit texture resolution", icon="CHECKMARK")

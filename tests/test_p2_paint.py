@@ -33,8 +33,9 @@ def _q(px):
 
 
 # ------------------------------------------------------------------ images
-@pytest.mark.parametrize("dim,res", [(1.0, 1024), (1.5, 2048), (4.0, 4096), (9.0, 4096), (0.2, 512)])
+@pytest.mark.parametrize("dim,res", [(1.0, 1024), (1.5, 2048), (4.0, 4096), (9.0, 4096), (0.2, 1024)])
 def test_texel_density(empty_scene, dim, res):
+    """v2.1 RES-1 clamps 1024..4096 (v2.0: 512..4096); density given explicitly here."""
     ob = uv_cube(empty_scene, size=dim)
     assert images.texel_resolution(ob, 1024) == res
 
@@ -43,7 +44,7 @@ def test_mask_image_format(painted):
     sc, ob, mat, ly = painted
     img = images.ensure_mask(ob, mat, ly)
     assert img.name == naming.mask_image_name(ob.name, ly.name)
-    assert tuple(img.size) == (1024, 1024)
+    assert tuple(img.size) == (2048, 2048)  # v2.1 RES-1: 2048 px per metre (1 m cube)
     assert img.colorspace_settings.name == "Non-Color" and img.alpha_mode == "CHANNEL_PACKED"
     assert img.packed_file is not None and img[naming.IMG_MASK] == "{}/{}".format(ob.name, ly.id)
     assert float(images.pixels(img)[..., 3].max()) == 0.0  # transparent: nothing painted

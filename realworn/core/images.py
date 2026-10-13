@@ -3,7 +3,10 @@
 PNT-1  one RGBA mask per painted layer, RW_<object>_<layer>_mask, non-colour, alpha 0 = not
        painted (Channel Packed so colour and alpha never premultiply).
 PNT-2  resolution from texel density: px per metre of the object's largest dimension, rounded to
-       a power of two, clamped 512..4096; Resize keeps the paint (resampled).
+       a power of two. v2.1 RES-1: 2048 px/m clamped 1024..4096; RES-2 Hero objects: 4096 px/m
+       clamped 2048..8192. Resize and Upgrade Masks keep the paint (bicubic, RES-3).
+RES-4  Damage layers and layers with Height on get float masks (no terraces in bump and
+       displacement); stored as half-float EXR (PNG mode) or packed. Other masks stay 8-bit.
 SAV-1  created packed by default; preference PNG writes //textures/realworn/<object>/<image>.png.
 SAV-2  save_pre handler: every dirty RealWorn image is packed or written before the file saves
        (pattern from Ucupaint image_ops.save_pack_all and Paint System image.save_image, see
@@ -18,8 +21,11 @@ import numpy as np
 
 from . import naming
 
-MIN_RES, MAX_RES = 512, 4096
+MIN_RES, MAX_RES = 1024, 4096          # v2.1 RES-1 (v2.0: 512..4096)
+HERO_MIN, HERO_MAX = 2048, 8192        # RES-2
+DENSITY, HERO_DENSITY = 2048, 4096     # px per metre of the largest dimension
 FORCE_STORAGE = None  # tests set "PACKED" / "PNG" (preferences are unavailable unregistered)
+PRECISION = True  # RES-4 float masks; the v2.0 suites turn it off (tests/conftest.py)
 
 
 def _prefs():
@@ -30,15 +36,48 @@ def _prefs():
         return None
 
 
+def is_hero(obj):
+    return obj is not None and bool(getattr(getattr(obj, "realworn", None), "hero", False))
+
+
 def texel_resolution(obj, density=None):
-    """PNT-2: power of two of (density px/m * largest world dimension), clamped 512..4096."""
+    """PNT-2 / RES-1 / RES-2: power of two of (density px/m * largest world dimension), clamped
+    1024..4096 (Hero objects: 4096 px/m, clamped 2048..8192)."""
+    hero = is_hero(obj)
     if density is None:
         p = _prefs()
-        density = p.texel_density if p is not None else 1024
+        density = HERO_DENSITY if hero else (p.texel_density if p is not None else DENSITY)
     dim = max(obj.dimensions) if obj is not None else 1.0
     px = max(density * max(dim, 1e-3), 1.0)
     res = 2 ** int(round(math.log2(px)))
-    return int(min(max(res, MIN_RES), MAX_RES))
+    lo, hi = (HERO_MIN, HERO_MAX) if hero else (MIN_RES, MAX_RES)
+    return int(min(max(res, lo), hi))
+
+
+def needs_precision(layer):
+    """RES-4: masks that drive relief get float pixels: Damage, and layers whose Height channel is
+    on with some relief (a value or an image; Custom layers start with Height on at 0 mm)."""
+    h = layer.height
+    return layer.type == "DAMAGE" or bool(h.enabled and (h.value != 0.0 or h.image is not None))
+
+
+def mask_bytes(res, precise):
+    """RAM of one RGBA mask: 8-bit, or float (Blender keeps float images as 32-bit in memory)."""
+    return res * res * 4 * (4 if precise else 1)
+
+
+def memory_estimate(obj, mat_layers, hero=None):
+    """RES-2: bytes the masks of these layers would take at the object's (or Hero) density."""
+    if hero is None:
+        res = texel_resolution(obj)
+    else:
+        saved = obj.realworn.hero
+        obj.realworn.hero = hero
+        try:
+            res = texel_resolution(obj)
+        finally:
+            obj.realworn.hero = saved
+    return sum(mask_bytes(res, needs_precision(ly)) for ly in mat_layers), res
 
 
 def _fill(img, rgba):
@@ -54,7 +93,8 @@ def create_mask(obj, layer, res=None, kind="mask"):
     """New RGBA image for a layer's mask (or content), transparent, tagged, packed or saved."""
     res = res or (layer.mask_res if layer.mask_res else texel_resolution(obj))
     name = (naming.mask_image_name if kind == "mask" else naming.content_image_name)(obj.name, layer.name)
-    img = bpy.data.images.new(name, res, res, alpha=True, float_buffer=False)
+    precise = kind == "mask" and needs_precision(layer) and PRECISION
+    img = bpy.data.images.new(name, res, res, alpha=True, float_buffer=precise)
     img.alpha_mode = "CHANNEL_PACKED"
     if kind == "mask":
         img.colorspace_settings.name = "Non-Color"
@@ -96,12 +136,15 @@ def store(img, obj=None, blend_path=None):
         owner = owner or (obj.name if obj else "realworn")
         folder = os.path.join(os.path.dirname(blend_path), "textures", "realworn", bpy.path.clean_name(owner))
         os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, bpy.path.clean_name(img.name) + ".png")
+        precise = img.is_float
+        path = os.path.join(folder, bpy.path.clean_name(img.name) + (".exr" if precise else ".png"))
         try:
             if img.packed_file is not None:
                 img.unpack(method="REMOVE")
             img.filepath_raw = path
-            img.file_format = "PNG"
+            img.file_format = "OPEN_EXR" if precise else "PNG"
+            if precise:
+                img.use_half_precision = True  # RES-4: 16-bit half float on disk
             img.save()
             img.source = "FILE"
             img.filepath = "//" + os.path.relpath(path, os.path.dirname(blend_path)).replace("\\", "/")
@@ -135,6 +178,73 @@ def resize(img, res):
     img.scale(res, res)
     store(img)
     return img
+
+
+def _cubic_weights(t):
+    """Keys cubic convolution (a = -0.5) weights for the 4 taps around fractional offset t."""
+    a = -0.5
+    x = np.stack([1 + t, t, 1 - t, 2 - t])
+    ax = np.abs(x)
+    return np.where(ax <= 1, (a + 2) * ax ** 3 - (a + 3) * ax ** 2 + 1,
+                    np.where(ax < 2, a * ax ** 3 - 5 * a * ax ** 2 + 8 * a * ax - 4 * a, 0.0))
+
+
+def _resample_axis(arr, n, axis):
+    old = arr.shape[axis]
+    pos = (np.arange(n) + 0.5) * old / n - 0.5
+    i0 = np.floor(pos).astype(np.int64)
+    w = _cubic_weights(pos - i0).astype(np.float32)  # (4, n)
+    out = 0.0
+    for k in range(4):
+        idx = np.clip(i0 - 1 + k, 0, old - 1)
+        taken = np.take(arr, idx, axis=axis)
+        shape = [1] * arr.ndim
+        shape[axis] = n
+        out = out + taken * w[k].reshape(shape)
+    return out
+
+
+def resample_bicubic(px, res):
+    """RES-3: bicubic resample of an (h, w, c) array to (res, res, c), clamped to 0..1. Channels
+    that are identical (masks painted white: R = G = B) are resampled once."""
+    px = px.astype(np.float32, copy=False)
+    out = np.empty((res, res, px.shape[2]), np.float32)
+    done = {}
+    for c in range(px.shape[2]):
+        twin = next((k for k in done if np.array_equal(px[..., k], px[..., c])), None)
+        if twin is not None:
+            out[..., c] = out[..., twin]
+            continue
+        out[..., c] = _resample_axis(_resample_axis(px[..., c], res, 0), res, 1)
+        done[c] = True
+    return np.clip(out, 0.0, 1.0, out=out)
+
+
+def upgrade(obj, layer, res=None):
+    """RES-3 / RES-4: resample a layer's mask to the current density (bicubic, paint kept) and
+    convert it to float when the layer drives relief. Returns the (possibly new) image."""
+    img = layer.mask_image
+    if img is None:
+        return None
+    res = res or texel_resolution(obj)
+    precise = needs_precision(layer) and PRECISION
+    if tuple(img.size) == (res, res) and img.is_float == precise:
+        return img
+    px = resample_bicubic(pixels(img), res) if tuple(img.size) != (res, res) else pixels(img)
+    new = bpy.data.images.new(img.name + ".up", res, res, alpha=True, float_buffer=precise)
+    new.alpha_mode = img.alpha_mode
+    new.colorspace_settings.name = img.colorspace_settings.name
+    for k in img.keys():
+        new[k] = img[k]
+    new.pixels.foreach_set(px.astype(np.float32).ravel())
+    new.update()
+    name = img.name
+    img.user_remap(new)  # the layer and the stack's image node follow
+    bpy.data.images.remove(img)
+    new.name = name
+    # left dirty and unpacked: the save handler packs or writes it (SAV-2), as after a stroke;
+    # packing 2048 px masks here would triple the time Upgrade Masks takes
+    return new
 
 
 def fill(img, value):

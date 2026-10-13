@@ -97,7 +97,7 @@ def enter(obj, mat, layer, target="MASK", mask_view=False):
         if obj.mode != "VERTEX_PAINT":
             with bpy.context.temp_override(**ctx.override(obj)):
                 bpy.ops.object.mode_set(mode="VERTEX_PAINT")
-        grunge.activate_brush(grunge.ensure_brush("RW Soft", mode="VERTEX_PAINT"))
+        grunge.activate_brush(grunge.ensure_brush("RW Soft", mode="VERTEX_PAINT"), remember=False)
         set_mode(obj, "PAINT")
         compiler.compile(mat)
         return None
@@ -108,7 +108,7 @@ def enter(obj, mat, layer, target="MASK", mask_view=False):
             bpy.ops.object.mode_set(mode="TEXTURE_PAINT")
     ip.mode = "IMAGE"
     ip.canvas = img
-    grunge.activate_brush(grunge.ensure_brush(grunge.chosen_brush()))
+    grunge.activate_brush(grunge.ensure_brush(grunge.chosen_brush(kind=layer.type)), remember=False)
     set_mode(obj, "PAINT")
     if mask_view and target == "MASK" and not mat.realworn.mask_view:
         mat.realworn.mask_view = True
