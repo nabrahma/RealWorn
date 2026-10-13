@@ -238,9 +238,9 @@ def source_density(obj, layer):
         uv = obj.data.uv_layers.active_render if obj.data.uv_layers else None
         if img is not None and uv is not None:
             k = diagnostics.uv_units_per_metre(obj, uv.name)
-            src = nodeutil.link_source(sock.node.inputs["Vector"])
-            if src is not None and src.node.bl_idname == "ShaderNodeMapping":  # the base's own tiling
-                k *= abs(src.node.inputs["Scale"].default_value[0]) or 1.0
+            vsrc = nodeutil.link_source(sock.node.inputs["Vector"])
+            if vsrc is not None and vsrc.node.bl_idname == "ShaderNodeMapping":  # the base's own tiling
+                k *= abs(vsrc.node.inputs["Scale"].default_value[0]) or 1.0
             return [("{} {}".format("Base Height" if src == "BASE_HEIGHT" else "Base AO", img.name),
                      img.size[0] * k / 100.0)]
     return []

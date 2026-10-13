@@ -1,4 +1,4 @@
-# RealWorn 2 (Paint)
+# RealWorn 2.1 (Paint, Sharp Detail)
 
 Paint wear, dirt, rust, water, decals and damage onto any material as layers, Substance-Painter
 style, inside Blender 5.2 LTS. Each layer is a look (a PBR content) plus a paintable mask, with
@@ -56,6 +56,38 @@ Every value slider writes straight into the shader (no recompile); adding, remov
 hiding or switching an ingredient recompiles only that material's `RW_Stack::<material>` group,
 which holds nodes only for what the visible layers use.
 
+## Getting Substance-level sharpness (v2.1)
+
+The painted mask says roughly **where** an effect goes; a full-resolution detail texture
+decides the exact, crisp **edge**. That is how Substance gets its look (paint + grunge + levels).
+
+- **Edge Detail** (Mask tab) is on by default for new effect layers. Pick its **Source**:
+  - **Layer Grunge**: a black-and-white grunge, box-projected; chips, rust breakup, speckled dust.
+  - **Base Height**: the base material's own height map. Dirt and Water use Height Compare on it,
+    so they sink into grooves, mortar and pits first; Damage carves brick faces before mortar.
+  - **Base AO**: the base's AO map, found next to its textures (or **Pick AO Image**).
+  - **Content Height**: the layer's own PBR set height, so chipped paint follows the paint texture.
+  - **Second Grunge**: mix a smaller breakup into any source (two scales of breakup).
+- **Edge Width** is the main sharpness control (small = hard); **Threshold** moves the edge in or
+  out. **Protect Interior** keeps the core of a stroke solid so only its edge breaks up.
+- **Before / After** (Mask tab) shows the soft stroke on the left half of the view and the
+  Edge Detail result on the right.
+- Paint with soft brushes for Dirt, Dust and Water: the crisp edge comes from the detail, not the
+  brush. Wear, Scratches and Damage default to the **RW Hard** brush.
+- **Textured Look** (Content tab) gives each effect real variation: two browns and grit for Dirt,
+  a dark core and orange rim for Rust, brushed streaks for Wear. Or load a PBR set (ambientCG and
+  Poly Haven downloads work; set a Content Library folder in Preferences for thumbnails).
+- Masks default to 2048 px per metre. **Hero** (Sharpness panel) gives 4096 px per metre for
+  extreme close-ups; **Upgrade Masks** resamples existing paint without losing it.
+- The **Sharpness** panel warns about settings that quietly blur textures (Limit Size, Simplify,
+  anisotropic filtering) and has a **Sharpness Report**: the edge width of each layer in pixels
+  and what limits it.
+- Files from v2.0 look exactly as before until you click **Apply v2.1 Defaults**.
+
+Measured on a 30 cm crate, 30 cm away, 1920 px wide: a soft painted Dirt stroke's edge went from
+58 px (v2.0) to 1.7 px; Rust from 137 px to 2.3 px. Halving the mask resolution no longer changes
+the edge (1 % spread across 512, 1024 and 2048 px masks). Details: docs/milestones/Q0 ... Q4.
+
 ## Saving, removing, old files
 
 - Masks are 8-bit RGBA images on `RW_Paint`, sized by texel density. They are packed into the .blend
@@ -66,12 +98,19 @@ which holds nodes only for what the visible layers use.
 ## Measured limits (docs/perf.md, machine: Windows 11, RTX 3060 Laptop)
 
 - Cycles render overhead of 4 typical live layers on a light 6-cube test scene, GPU (OptiX):
-  **+34%** with Cycles defaults (budget +40%), **+15-19%** after Bake (budget +15%: on the line, varies run to run).
-  Per fixed sample the shading itself costs more: **+48%** live and **+32%** baked (known
-  limitation). On CPU the live overhead is about +80%. Bump re-evaluates every height-carrying
-  mask, so disable layer Height where you do not need relief, and Bake before heavy finals.
-- Material Preview with 10 layers: well above 30 fps; add-layer recompile about 0.25-0.3 s;
-  EEVEE shaders ready about 0.3-0.5 s later.
+  - v2.0 stack (Edge Detail and looks off): about **+34-42%** with Cycles defaults, **+48%** per
+    fixed sample; after Bake +15-22%.
+  - v2.1 defaults (Edge Detail and textured looks on): **+92%** with Cycles defaults (budget +40%),
+    **+115%** per fixed sample, **+32%** after Bake (budget +15%). Known limitation: crisp relief
+    means the shared bump re-evaluates each relief layer's Edge Detail three times, and the looks
+    add noise per shading point. Levers: turn off layer Height or Micro Normal where relief is
+    not needed, Textured Look off on layers you do not see up close, Flatten finished layers, and
+    Bake before heavy final renders.
+- Material Preview, 10-layer crate with v2.1 defaults: about 146-154 fps. Changing a value never
+  recompiles; a structural change recompiles in about 0.5 s, then EEVEE needs about 0.7 s if it
+  has compiled that variant before and about 6 s when it has not (known limitation, budget 1 s).
+- Masks: 8 layers at 2048 px take 128 MB as 8-bit; relief layers (Damage, Height on) are float,
+  and Blender keeps float images at 32 bits in RAM, so 8 layers with 2 float take 224 MB.
 - Mask detail on generated masks (Edge, Cavity, Contact) follows mesh density.
 - Geometry damage needs closed manifold meshes; Bake excludes or errors on it (choose in Bake).
 

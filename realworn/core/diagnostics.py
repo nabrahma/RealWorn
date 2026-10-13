@@ -143,8 +143,13 @@ def limit_text(obj, layer):
     detail_rows = detail_px_per_cm(obj, layer)
     if detail_rows:  # with Edge Detail on, the detail source decides the edge, not the mask (S2)
         rows = detail_rows
+    elif getattr(layer, "detail", None) is not None and layer.detail.strength > 0:
+        from . import detail
+        src, _ = detail.resolve(layer.id_data, layer)
+        if src in ("BASE_HEIGHT", "BASE_AO"):
+            return "{} (procedural: no texel limit)".format("Base Height" if src == "BASE_HEIGHT" else "Base AO")
     if not rows:
-        return "nothing painted"
+        return "ingredients only (no painted mask)" if layer.ingredients else "nothing painted"
     name, px = min(rows, key=lambda r: r[1])
     return "{} ({:.1f} px/cm)".format(name, px)
 

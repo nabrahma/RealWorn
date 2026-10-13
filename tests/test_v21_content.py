@@ -46,6 +46,7 @@ def test_look_is_lean_live_and_routes_colour_roughness_and_relief(empty_scene):
     ob, mat = su.crate(empty_scene, size=1.0)
     ly = layers.add_layer(mat, "DIRT")
     assert ly.look.enabled  # v2.1 default for effect types
+    ly.look.micro = 0.6  # Dirt's relief is off by default (Q4 cost); on here to test the route
     su.paint_layer(ob, mat, ly, lambda r: np.ones((r, r)))
     g = mat.realworn.stack
     look = g.nodes[naming.layer_node(ly.id, "look")]
