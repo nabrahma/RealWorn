@@ -23,7 +23,7 @@ KINDS = ("VARIATION", "PAINT", "REVEAL", "DECALS", "EDGE_WEAR", "DIRT")
 # Default stack position, bottom to top (the tutorial's order: variation over the base, paint over
 # that, worn edges, damage breaking through, decals over the damage, dirt settling on top).
 ORDER = ("VARIATION", "PAINT", "EDGE_WEAR", "REVEAL", "DECALS", "DIRT")
-CONTENTS = ("TEXTURE", "TINT_BELOW", "COLOR")
+CONTENTS = ("TEXTURE", "TINT_BELOW", "COLOR")  # Tint Below: a recoloured copy of the Base (the tutorial's trick)
 
 INFO = {
     "VARIATION": {"label": "Variation", "icon": "MOD_NOISE", "paint": None},

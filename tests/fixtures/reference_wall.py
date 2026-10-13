@@ -427,11 +427,12 @@ def _mix_float(T, fac, a, b):
     return next(s for s in n.outputs if s.identifier == "Result_Float")
 
 
-def build_material(obj, images=None, upto="dirt"):
-    """The reference material on `obj`, built up to and including step `upto` (STEPS).
+def build_material(obj, images=None, upto="dirt", skip=()):
+    """The reference material on `obj`, built up to and including step `upto` (STEPS), leaving out
+    the steps in `skip` (a milestone that compares up to the damage step before edge wear exists).
     `images`: {'paint', 'reveal', 'decal'} bpy images (sampled through the paint UV)."""
     last = STEPS.index(upto)
-    on = lambda step: STEPS.index(step) <= last  # noqa: E731
+    on = lambda step: STEPS.index(step) <= last and step not in skip  # noqa: E731
     mat = bpy.data.materials.new("Reference_Wall")
     mat.displacement_method = "BUMP"
     nt = mat.node_tree

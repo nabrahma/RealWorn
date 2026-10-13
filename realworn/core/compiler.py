@@ -100,6 +100,7 @@ class _B(Tree):
         self.lid = "stack"
         self.n = 0
         self._mark = 0
+        self.base_channels = {}
 
     def begin(self, lid):
         self.lid = lid
@@ -351,7 +352,11 @@ def content(b, layer, cur):
             out["metallic"] = 0.0
         return out
     if c == "TINT_BELOW":
-        out["color"] = _hsv(b, "hsv", cur["Base Color"], layer.hue, layer.saturation, layer.value)
+        # the tutorial's trick: a copy of the Base material, recoloured with Hue/Saturation (its
+        # roughness and metallic come along); layers in between do not show through
+        base = b.base_channels
+        out["color"] = _hsv(b, "hsv", base["Base Color"], layer.hue, layer.saturation, layer.value)
+        out["roughness"], out["metallic"] = base["Roughness"], base["Metallic"]
         return out
     # COLOR (and TEXTURE with nothing loaded yet): the tutorial's plain BSDF
     out["color"] = _hsv(b, "hsv", b.rgb_node("color", layer.color), layer.hue, layer.saturation, layer.value)
@@ -419,6 +424,7 @@ def compile(mat):
     ctx = {"height": None, "coverage": None, "mask_view": None}
     b.begin("base")
     _base(b, mat, cur, ctx)
+    b.base_channels = dict(cur)  # Tint Below recolours a copy of the Base
     b.end(0, "Base: " + (st.base.name or "texture set") if st.base.loaded() else None)
     active = st.active_layer_index
     for idx, layer in enumerate(st.layers):

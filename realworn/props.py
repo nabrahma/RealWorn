@@ -15,7 +15,8 @@ from .core import kinds as K
 KIND_ITEMS = [(k, K.label(k), "New {} layer".format(K.label(k)), K.INFO[k]["icon"], i)
               for i, k in enumerate(K.KINDS)]
 CONTENT_ITEMS = [("TEXTURE", "Texture", "A loaded texture set, box mapped"),
-                 ("TINT_BELOW", "Tint Below", "Hue, saturation and value shift of everything under this layer"),
+                 ("TINT_BELOW", "Tint Below", "A recoloured copy of the Base (the tutorial's duplicated material with "
+                                              "Hue/Saturation): its texture shows, the layers in between do not"),
                  ("COLOR", "Color", "A flat colour with roughness (a plain BSDF)")]
 SOURCE_ITEMS = [("LIVE", "Live", "The tutorial's Bevel / AO nodes, evaluated in Cycles"),
                 ("BAKED", "Baked", "Baked to an image on RW_Paint: looks the same in EEVEE, renders faster")]

@@ -19,7 +19,7 @@ import bpy
 import numpy as np
 import pytest
 
-from reference_realworn import build_pair, realworn_look
+from reference_realworn import build_pair, realworn_look, write_masks
 from fixtures import reference_wall as R
 from perf_log import record
 
@@ -64,10 +64,11 @@ def test_r0_reference_target(empty_scene, out_dir):
     assert 0.05 < float(px.mean()) < 0.9
 
 
-def compare_stage(sc, out_dir, milestone, upto):
+def compare_stage(sc, out_dir, milestone, upto, skip=()):
     """REF-3: render both walls, compare, save the side-by-side and the diff to docs/milestones."""
-    wall, ref, arr = build_pair(sc, upto)
-    realworn_look(wall, upto)
+    wall, ref, arr = build_pair(sc, upto, skip=skip)
+    realworn_look(wall, upto, skip=skip)
+    write_masks(wall)
     folder = os.path.join(MILESTONES, milestone)
     os.makedirs(folder, exist_ok=True)
     wall.hide_render, ref.hide_render = True, False
@@ -90,4 +91,14 @@ def test_r1_base_and_variations(empty_scene, out_dir):
     mad, block, wall = compare_stage(empty_scene, out_dir, "R1", "variations")
     mat = wall.material_slots[0].material
     assert [ly.kind for ly in mat.realworn.layers] == ["VARIATION"] * 4
+    assert mad < MAD_MAX and block < BLOCK_MAX
+
+
+# ------------------------------------------------------------------ R2
+def test_r2_up_to_damage(empty_scene, out_dir):
+    """Reference comparison up to the damage step: base, second material, variations, paint, reveal
+    (edge wear is R4)."""
+    mad, block, wall = compare_stage(empty_scene, out_dir, "R2", "reveal", skip=("edges",))
+    mat = wall.material_slots[0].material
+    assert [ly.kind for ly in mat.realworn.layers][-2:] == ["PAINT", "REVEAL"]
     assert mad < MAD_MAX and block < BLOCK_MAX

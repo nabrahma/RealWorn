@@ -166,7 +166,7 @@ def test_variation_has_no_paint_and_tints_below(wall):
     assert ly.mask_image is None and ly.breakup_grunge is not None and ly.breakup_amount == 1.0
     hsv = g.nodes[naming.layer_node(ly.id, "hsv")]
     src = hsv.inputs["Color"].links[0].from_node
-    assert src.name == "RW::in"  # Tint Below: the stack's colour so far (here the base)
+    assert src.name == "RW::in"  # Tint Below: a recoloured copy of the Base (here the wrapped material)
     assert hsv.inputs["Saturation"].default_value == pytest.approx(0.7)
     sub = g.nodes[naming.layer_node(ly.id, "breakup.sub")]
     assert sub.blend_type == "SUBTRACT" and sub.inputs[0].default_value == pytest.approx(1.0)
