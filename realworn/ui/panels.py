@@ -60,8 +60,9 @@ class RW_UL_layers(bpy.types.UIList):
         row = layout.row(align=True)
         row.prop(item, "visible", text="", emboss=False, icon="HIDE_OFF" if item.visible else "HIDE_ON")
         row.label(text="", icon=K.INFO[item.kind]["icon"])
-        name = item.name if item.name.startswith(K.label(item.kind)) else "{}: {}".format(K.label(item.kind), item.name)
-        row.label(text=name)
+        if not item.name.startswith(K.label(item.kind)):  # "Reveal: Damage", as in the PRD sketch
+            row.label(text=K.label(item.kind) + ":")
+        row.prop(item, "name", text="", emboss=False)  # UI-2: double-click to rename
         note = status(context.active_object, item, context)
         if note:
             sub = row.row()
@@ -99,7 +100,8 @@ def _banners(layout, mat):
     if st.applied and st.schema_version == 2:
         box = layout.box()
         box.label(text="Painted with RealWorn v2", icon="ERROR")
-        op(box, "realworn.convert_v2", icon="FILE_REFRESH")
+        o = op(box, "realworn.convert_v2", icon="FILE_REFRESH")
+        o.material = mat.name
         op(box, "realworn.remove", icon="X")
         return True
     return False

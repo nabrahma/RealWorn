@@ -93,3 +93,122 @@ def remove_v07():
 def _v2_decal(empty):
     """A v2.x decal projector (handled by the v2 conversion, not by the v0.7 cleanup)."""
     return bool(empty.get("rw_v2_decal"))
+
+
+# ================================================================ v2.x files (PRD v3 "Migration")
+V2_ORDER = ("DIRT", "DUST", "RUST", "WEAR", "SCRATCHES", "WATER", "PAINT", "DAMAGE", "DECAL", "CUSTOM")
+V2_MODIFIERS = ("RW_Masks", "RW_Damage", "RW_DisplaceSubdiv")
+# v2 type -> (v3 kind, preset): a clear match keeps the painted mask; the rest is reported
+V2_TO_V3 = {"PAINT": ("PAINT", None), "DIRT": ("PAINT", None), "DUST": ("PAINT", None), "RUST": ("PAINT", None),
+            "CUSTOM": ("PAINT", None), "WEAR": ("REVEAL", None), "SCRATCHES": ("REVEAL", "SCRATCHES"),
+            "DAMAGE": ("REVEAL", None)}
+
+
+def is_v2_material(mat):
+    st = getattr(mat, "realworn", None)
+    return bool(st is not None and mat.node_tree is not None and st.applied and st.stack is not None
+                and st.schema_version == 2)
+
+
+def find_v2():
+    return [m for m in bpy.data.materials if is_v2_material(m)]
+
+
+def _raw(group, key, default=None):
+    try:
+        v = group.get(key, default) if group is not None else default
+    except (TypeError, AttributeError):
+        return default
+    return v
+
+
+def _v2_layers(mat):
+    """The old layers as plain dicts, read from the raw ID properties v3 no longer defines."""
+    out = []
+    for ly in mat.realworn.layers:
+        t = _raw(ly, "type", V2_ORDER.index("CUSTOM"))
+        kind = V2_ORDER[t] if isinstance(t, int) and 0 <= t < len(V2_ORDER) else str(t)
+        color = _raw(ly, "color")
+        rough = _raw(ly, "roughness")
+        dmg = _raw(ly, "damage")
+        dec = _raw(ly, "decal")
+        out.append({"type": kind, "name": ly.name, "visible": ly.visible, "opacity": ly.opacity,
+                    "mask": ly.mask_image,
+                    "color": tuple(_raw(color, "color", (0.5, 0.5, 0.5)))[:3],
+                    "roughness": float(_raw(rough, "value", 0.5)),
+                    "depth_mm": float(_raw(dmg, "depth_mm", 3.0)),
+                    "empty": _raw(dec, "empty")})
+    return out
+
+
+def convert_v2(mat):
+    """Convert one v2.x material: restore it exactly from its snapshot, set it up for v3 and rebuild
+    the layers that have a clear match, keeping their painted masks. Returns report tuples."""
+    from . import compiler, injector, layers as L, naming as N, pbrset, reveal
+    rep = []
+    if not is_v2_material(mat):
+        return [("WARNING", "{}: not a v2.x material".format(mat.name))]
+    old = _v2_layers(mat)
+    objs = compiler.objects_using(mat)
+    for o in objs:
+        for mod in [md for md in o.modifiers if md.name in V2_MODIFIERS]:
+            o.modifiers.remove(mod)
+    for e in {d["empty"] for d in old if isinstance(d["empty"], bpy.types.Object)}:
+        bpy.data.objects.remove(e)
+    coll = bpy.data.collections.get("RW_Decals")
+    if coll is not None and not coll.objects:
+        bpy.data.collections.remove(coll)
+    keep = [d["mask"] for d in old if d["mask"] is not None]
+    for img in keep:
+        img.use_fake_user = True  # survive the restore while no layer points at them
+    diffs = injector.restore(mat)
+    if diffs:
+        for img in keep:
+            img.use_fake_user = False
+        return [("ERROR", "{}: v2 restore mismatch ({} diffs), left as it was: {}".format(
+            mat.name, len(diffs), diffs[0]))]
+    st = mat.realworn
+    st.layers.clear()
+    names = {p.identifier for p in st.bl_rna.properties}
+    for k in [k for k in st.keys() if k not in names]:
+        del st[k]  # v2 / v2.1 material settings v3 does not have
+    pbrset.clear(st.base)
+    reveal.restore(mat)
+    injector.inject(mat)
+    st.owner = objs[0].name if objs else st.owner
+    for d in old:
+        if d["type"] not in V2_TO_V3:
+            rep.append(("WARNING", "{} / {}: {} layers have no v3 kind; not converted (Remove and redo, or "
+                                   "paint it again)".format(mat.name, d["name"], d["type"].title())))
+            continue
+        kind, preset = V2_TO_V3[d["type"]]
+        with compiler.batch(mat):
+            ly = L.add_layer(mat, kind, preset, name=d["name"], index=len(st.layers))
+            ly.content, ly.color, ly.roughness = "COLOR", d["color"], d["roughness"]
+            ly.visible, ly.opacity = d["visible"], d["opacity"]
+            if kind == "REVEAL":
+                ly.depth_mm = d["depth_mm"] if d["type"] == "DAMAGE" else (0.3 if preset else 0.0)
+                if d["type"] == "WEAR":
+                    ly.edge_dark = 0.0
+            if d["mask"] is not None:
+                ly.mask_image = d["mask"]
+                d["mask"][N.IMG_MASK] = "{}/{}".format(st.owner, ly.id)
+                if d["mask"].colorspace_settings.name != "Non-Color":
+                    d["mask"].colorspace_settings.name = "Non-Color"
+        rep.append(("INFO", "{} / {}: {} -> {}{}".format(mat.name, d["name"], d["type"].title(), kind.title(),
+                                                       " (painted mask kept)" if d["mask"] is not None else "")))
+    for img in keep:
+        img.use_fake_user = False
+    compiler.compile(mat)
+    from . import assets
+    assets.remove_unused_groups()  # the v2 node groups nothing uses any more
+    rep.append(("INFO", "{}: converted to v3; edge and cavity helpers, Edge Lock, Edge Detail, looks and geometry "
+                        "damage are not in v3 (tag v2.1-q4 keeps them)".format(mat.name)))
+    return rep
+
+
+def convert_all_v2():
+    rep = []
+    for m in find_v2():
+        rep += convert_v2(m)
+    return rep

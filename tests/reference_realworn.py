@@ -52,15 +52,17 @@ def ramp_stops_sliders(black, white):
     return (black + white) / 2.0, (0.5 - w) / 0.49
 
 
-def realworn_look(wall, upto, skip=()):
-    """REF-2: the same look with RealWorn operators and sliders only."""
+def realworn_look(wall, upto, skip=(), base=True):
+    """REF-2: the same look with RealWorn operators and sliders only (`base` False: the Base texture
+    is already loaded)."""
     last = R.STEPS.index(upto)
     on = lambda step: R.STEPS.index(step) <= last and step not in skip  # noqa: E731
     mat = wall.material_slots[0].material
     m = mat.name
-    assert bpy.ops.realworn.use_texture(material=m, layer="BASE", path=R.set_folder("base"),
-                                        scale=R.SET_SCALE) == {"FINISHED"}
-    mat.realworn.base.bump = R.BUMP
+    if base:
+        assert bpy.ops.realworn.use_texture(material=m, layer="BASE", path=R.set_folder("base"),
+                                            scale=R.SET_SCALE) == {"FINISHED"}
+        mat.realworn.base.bump = R.BUMP
     if on("second"):
         bpy.ops.realworn.layer_add(material=m, kind="VARIATION", preset="SECOND_MATERIAL")
         ly = _layer(mat)

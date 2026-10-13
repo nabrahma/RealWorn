@@ -10,7 +10,7 @@ import bpy
 from realworn.core import kinds as K
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NOT_YET = {"convert_v2"}  # R5 v2.x conversion
+NOT_YET = set()  # every operator the UI references must exist (R5)
 
 
 def _sources():

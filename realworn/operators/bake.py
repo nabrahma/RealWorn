@@ -127,7 +127,31 @@ class RW_OT_migrate_v07(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_bake, RW_OT_restore_live, RW_OT_export_textures, RW_OT_bake_sources, RW_OT_migrate_v07)
+class RW_OT_convert_v2(bpy.types.Operator):
+    """This material was painted with RealWorn v2: convert it to v3. Paint, Dirt, Rust, Dust and Custom
+    become Paint layers, Wear, Scratches and Damage become Reveal layers, each keeping its painted mask;
+    Water and projector decals are reported (Remove and redo them)"""
+    bl_idname = "realworn.convert_v2"
+    bl_label = "Convert to v3"
+    bl_options = {"REGISTER", "UNDO"}
+
+    material: StringProperty(name="Material", default="", description="Empty: every v2.x material")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_confirm(self, event)
+
+    def execute(self, context):
+        if self.material:
+            mat = bpy.data.materials.get(self.material)
+            rep = migrate.convert_v2(mat) if mat is not None else [("WARNING", "no material " + self.material)]
+        else:
+            rep = migrate.convert_all_v2()
+        report_all(self, [r for r in rep if r[0] != "INFO"] or rep[-1:])
+        return {"FINISHED"}
+
+
+_classes = (RW_OT_bake, RW_OT_restore_live, RW_OT_export_textures, RW_OT_bake_sources, RW_OT_migrate_v07,
+            RW_OT_convert_v2)
 
 
 def register():
