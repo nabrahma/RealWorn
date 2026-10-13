@@ -324,6 +324,55 @@ class RW_PT_bake(_Base, bpy.types.Panel):
         opx(row, "realworn.export_textures", icon="EXPORT")
 
 
+class RW_PT_sharpness(_Base, bpy.types.Panel):
+    """PRD v2.1 diagnostics: settings that cap texture resolution, and what limits the edge."""
+    bl_space_type = "VIEW_3D"
+    bl_label = "Sharpness"
+    bl_idname = "RW_PT_sharpness"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        ob, mat = _context_material(context)
+        return mat is not None and injector.is_setup(mat)
+
+    def draw(self, context):
+        from ..core import diagnostics
+        lay = self.layout
+        ob, mat = _context_material(context)
+        found = diagnostics.check(context.preferences.system, context.scene, setup.materials_of(ob))
+        if not found:
+            lay.label(text="No settings limit texture resolution", icon="CHECKMARK")
+        for f in found:
+            box = lay.box()
+            col = box.column(align=True)
+            for i, line in enumerate(_wrap(f["text"], 42)):
+                col.label(text=line, icon=("ERROR" if f["level"] == "WARNING" else "INFO") if i == 0 else "BLANK1")
+            if f["fix"]:
+                opx(box, f["fix"])
+        st = mat.realworn
+        if st.layers and 0 <= st.active_layer_index < len(st.layers):
+            layer = st.layers[st.active_layer_index]
+            rows = diagnostics.readout(ob, layer)
+            if rows:
+                col = lay.column(align=True)
+                col.label(text="{}: texels per cm".format(layer.name))
+                limit = min(rows, key=lambda r: r[1])[0] if len(rows) > 1 else None
+                for name, px in rows:
+                    col.label(text="  {}: {:.1f}{}".format(name, px, "  (limits the edge)" if name == limit else ""))
+
+
+def _wrap(text, width):
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        if len(cur) + len(w) + 1 > width and cur:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = (cur + " " + w).strip()
+    return lines + [cur] if cur else lines
+
+
 class RW_PT_tools(_Base, bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_label = "Decals, Ground, Debug"
@@ -369,7 +418,7 @@ class RW_PT_image_main(_Base, bpy.types.Panel):
     draw = draw_main
 
 
-_classes = (RW_UL_layers, RW_PT_main, RW_PT_bake, RW_PT_tools, RW_PT_image_main)
+_classes = (RW_UL_layers, RW_PT_main, RW_PT_bake, RW_PT_sharpness, RW_PT_tools, RW_PT_image_main)
 
 
 def register():
