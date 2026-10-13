@@ -218,6 +218,7 @@ def _wrap(obj, mat, rep):
             from . import detail
             mat.realworn.v21 = True  # v2.1 Setup: new layers get the per-type Edge Detail defaults
             detail.capture_base(mat)  # SRC-2: base height normalisation
+            detail.capture_ao(mat)  # SRC-4: the base's AO map, when there is one
         mat.realworn.owner = obj.name
     except injector.InjectError as ex:
         rep.append(("WARNING", str(ex)))

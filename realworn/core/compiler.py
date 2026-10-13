@@ -199,20 +199,39 @@ def _vertex_mask(b, layer):
     return n.outputs["Color"], n.outputs["Alpha"]
 
 
-def base_height_norm(b, mat):
-    """SRC-1/SRC-2: the base height (the stack's Height input, sampled once outside the stack)
-    normalised to 0..1 by ONE Map Range per stack, shared by every layer that uses it."""
-    name = naming.layer_node("stack", "bh")
+_SHARED_NORM = {"bh": ("Height", "base_height_lo", "base_height_hi"), "ao": ("AO", "base_ao_lo", "base_ao_hi")}
+
+
+def _shared_norm(b, mat, role):
+    """SRC-1/SRC-2: a base map (a stack input, sampled once outside the stack) normalised to 0..1
+    by ONE Map Range per stack, shared by every layer that uses it."""
+    name = naming.layer_node("stack", role)
     n = b.nodes.get(name)
+    sock, lo, hi = _SHARED_NORM[role]
     if n is None:
         n = b.nodes.new("ShaderNodeMapRange")
         n.name = name
         n.clamp = True
-        b.links.new(b.gi.outputs["Height"], n.inputs["Value"])
-        n.location = (-300, 500)
+        b.links.new(b.gi.outputs[sock], n.inputs["Value"])
+        n.location = (-300, 500 if role == "bh" else 650)
     st = mat.realworn
-    n.inputs[1].default_value, n.inputs[2].default_value = st.base_height_lo, st.base_height_hi
+    n.inputs[1].default_value, n.inputs[2].default_value = getattr(st, lo), getattr(st, hi)
     return n.outputs["Result"]
+
+
+def base_height_norm(b, mat):
+    return _shared_norm(b, mat, "bh")
+
+
+def _grunge(b, role, img, scale, rotation=0.0, offset=0.0, cubic=False, anti_tile=False):
+    """A box-projected grunge lookup; with anti-tiling (SRC-6) two lookups blended per cell."""
+    vec = _box_vector(b, role, scale, rotation, offset)
+    if not anti_tile:
+        return b.outp(_image_node(b, role + ".img", img, vec, box=True, cubic=cubic), "Color")
+    at = b.group(naming.SH_ANTI_TILE, role + ".at", Vector=vec, Seed=offset)
+    first = _image_node(b, role + ".img", img, b.outp(at, "A"), box=True, cubic=cubic)
+    second = _image_node(b, role + ".img2", img, b.outp(at, "B"), box=True, cubic=cubic)
+    return b.mixf(b.outp(at, "Blend"), first.outputs["Color"], second.outputs["Color"])
 
 
 _EDGE_GROUPS = {"ERODE": naming.SH_EDGE_ERODE, "BURN": naming.SH_EDGE_BURN, "HEIGHT": naming.SH_EDGE_HEIGHT}
@@ -229,11 +248,20 @@ def edge_detail(b, layer, m):
     src, img = detail.resolve(mat, layer)
     if src == "BASE_HEIGHT":
         d = base_height_norm(b, mat)
+    elif src == "BASE_AO":
+        d = _shared_norm(b, mat, "ao")
+    elif src == "CONTENT_HEIGHT":
+        d = _channel_image(b, "height", layer.height, True).outputs["Color"]  # shared with the channel
     elif src == "LAYER_GRUNGE":
-        vec = _box_vector(b, "edge", det.scale, det.rotation, det.offset)
-        d = b.outp(_image_node(b, "edge.img", img, vec, box=True, cubic=det.cubic), "Color")
+        d = _grunge(b, "edge", img, det.scale, det.rotation, det.offset, det.cubic, det.anti_tile)
+    elif src == "GRUNGE2":
+        d = _grunge(b, "edge", img, det.scale2, det.rotation, det.offset, det.cubic, det.anti_tile)
     else:
         return m
+    if det.mix2 > 0.0 and det.image2 is not None and src != "GRUNGE2":
+        # a second, smaller breakup on top of any source (two scales of breakup)
+        d2 = _grunge(b, "edge2", det.image2, det.scale2, det.rotation, det.offset + 3.7, det.cubic, det.anti_tile)
+        d = b.clamp(b.add(d, b.mul(b.sub(d2, 0.5), b.value_node("edge.mix2", det.mix2))))
     d = b.outp(b.group(naming.SH_CONTRAST, "edge.contrast", Value=d, Contrast=det.contrast,
                        Invert=1.0 if det.invert else 0.0))
     kw = dict(Mask=m, Detail=d, Strength=det.strength, Width=det.width, Threshold=det.threshold)
@@ -277,18 +305,28 @@ def build_mask(b, layer, masks, base_height, decal_alpha=None):
 
 
 # ---------------------------------------------------------------- content
+def _channel_image(b, name, ch, scalar):
+    """The image node of a channel with an image source, made once per layer block (Edge Detail's
+    Content Height source and the channel itself share it)."""
+    role = name
+    existing = b.nodes.get(naming.layer_node(b.lid, role + ".img"))
+    if existing is not None:
+        return existing
+    baked = bool(ch.image.get("rw_baked"))  # Flatten output: painted space, sampled through RW_Paint
+    if baked:
+        vec = _paint_uv(b)
+    elif ch.use_uv:
+        vec = b.outp(b.named("ShaderNodeUVMap", role + ".uv"))
+    else:
+        vec = _box_vector(b, role, ch.scale)
+    return _image_node(b, role + ".img", ch.image, vec, non_color=scalar, box=not (ch.use_uv or baked))
+
+
 def _channel_source(b, layer, name, ch, scalar):
     """The B value of one channel: flat value, image, PBR set map or tinted grunge."""
     role = name
     if ch.source in ("IMAGE", "PBRSET") and ch.image is not None:
-        baked = bool(ch.image.get("rw_baked"))  # Flatten output: painted space, sampled through RW_Paint
-        if baked:
-            vec = _paint_uv(b)
-        elif ch.use_uv:
-            vec = b.outp(b.named("ShaderNodeUVMap", role + ".uv"))
-        else:
-            vec = _box_vector(b, role, ch.scale)
-        img = _image_node(b, role + ".img", ch.image, vec, non_color=scalar, box=not (ch.use_uv or baked))
+        img = _channel_image(b, name, ch, scalar)
         out = img.outputs["Color"]
         if name == "height":  # image height (0..1) scaled by the channel value in mm
             out = b.mul(out, b.value_node(role + ".value", ch.value))
@@ -572,11 +610,19 @@ def set_value(mat, path):
         elif prop in ("contrast", "invert"):
             targets.append(("edge.contrast", "Contrast" if prop == "contrast" else "Invert",
                             det.contrast if prop == "contrast" else (1.0 if det.invert else 0.0)))
-        elif prop in ("scale", "rotation", "offset"):
-            sc = 1.0 / max(det.scale, 1e-4)
-            o = det.offset
-            targets += [("edge.map", "Scale", (sc, sc, sc)), ("edge.map", "Rotation", (0.0, 0.0, det.rotation)),
-                        ("edge.map", "Location", (o, o * 0.7, o * 0.3))]
+        elif prop in ("scale", "rotation", "offset", "scale2"):
+            o, o2 = det.offset, det.offset + 3.7
+            s1 =1.0 / max(det.scale2 if layer.detail.source == "GRUNGE2" else det.scale, 1e-4)
+            s2 = 1.0 / max(det.scale2, 1e-4)
+            targets += [("edge.map", "Scale", (s1, s1, s1)), ("edge.map", "Rotation", (0.0, 0.0, det.rotation)),
+                        ("edge.map", "Location", (o, o * 0.7, o * 0.3)),
+                        ("edge2.map", "Scale", (s2, s2, s2)), ("edge2.map", "Rotation", (0.0, 0.0, det.rotation)),
+                        ("edge2.map", "Location", (o2, o2 * 0.7, o2 * 0.3)),
+                        ("edge.at", "Seed", o), ("edge2.at", "Seed", o2)]
+        elif prop == "mix2":
+            if det.mix2 <= 0.0 or g.nodes.get(naming.layer_node(lid, "edge.mix2")) is None:
+                return False  # crossing 0 adds or removes the second grunge
+            targets.append(("edge.mix2", None, det.mix2))
         else:
             return False
     else:
@@ -602,10 +648,11 @@ def on_material_value(mat, prop):
     if not isinstance(mat, bpy.types.Material) or suspended(mat) or not mat.realworn.applied:
         return
     g = mat.realworn.stack
-    n = g.nodes.get(naming.layer_node("stack", "bh")) if g is not None else None
-    if n is not None:
-        n.inputs[1].default_value = mat.realworn.base_height_lo
-        n.inputs[2].default_value = mat.realworn.base_height_hi
+    for role, (_, lo, hi) in _SHARED_NORM.items():
+        n = g.nodes.get(naming.layer_node("stack", role)) if g is not None else None
+        if n is not None:
+            n.inputs[1].default_value = getattr(mat.realworn, lo)
+            n.inputs[2].default_value = getattr(mat.realworn, hi)
 
 
 def on_active_layer(pg):

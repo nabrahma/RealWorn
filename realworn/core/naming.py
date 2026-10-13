@@ -39,8 +39,9 @@ SH_VARIATION = "RW_P_Variation"
 SH_EDGE_ERODE = "RW_P_EdgeErode"     # v2.1 Edge Detail modes (EDG-1..EDG-8)
 SH_EDGE_BURN = "RW_P_EdgeBurn"
 SH_EDGE_HEIGHT = "RW_P_EdgeHeight"
+SH_ANTI_TILE = "RW_P_AntiTile"       # v2.1 SRC-6: per-cell random rotation / offset
 ALL_GROUPS = (GN_MASKS, GN_DAMAGE, SH_PAINT_OVER, SH_EDGE_LOCK, SH_HEIGHT_BLEND, SH_LEVELS, SH_UP, SH_CONTRAST,
-              SH_VARIATION, SH_WATER, SH_DAMAGE, SH_DECAL_PROJECT, SH_EDGE_ERODE, SH_EDGE_BURN, SH_EDGE_HEIGHT)
+              SH_VARIATION, SH_WATER, SH_DAMAGE, SH_DECAL_PROJECT, SH_EDGE_ERODE, SH_EDGE_BURN, SH_EDGE_HEIGHT, SH_ANTI_TILE)
 
 # Per-material stack group (CMP-1): only core/compiler.py edits its contents.
 STACK_PREFIX = "RW_Stack::"
@@ -64,6 +65,9 @@ UNIQUE_SUFFIX = ".RW"            # SET-3: material duplicated for one object
 DEFAULT_MATERIAL = "RW_Default"  # SET-1: given to empty slots
 MAX_DECALS_PER_MATERIAL = 16
 
+# Base node RealWorn adds to a user tree for an AO map found next to the textures (SRC-4).
+BASE_AO_ROLE = "base_ao"
+
 # Image tags (custom properties on images RealWorn creates).
 IMG_MASK = "rw_mask"             # value: "<object>/<layer id>"
 IMG_CONTENT = "rw_content"
@@ -79,6 +83,7 @@ STACK_INPUTS = (
     ("Coat Roughness", "FLOAT", 0.03),
     ("Coat IOR", "FLOAT", 1.5),
     ("Coat Normal", "VECTOR", None),
+    ("AO", "FLOAT", 1.0),  # v2.1 SRC-4: the base's AO map (sampled once, outside the stack)
 )
 STACK_OUTPUTS = (
     ("Base Color", "COLOR"), ("Roughness", "FLOAT"), ("Metallic", "FLOAT"), ("Normal", "VECTOR"),

@@ -66,7 +66,59 @@ class RW_OT_apply_v21_defaults(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_fix_texture_limit, RW_OT_fix_simplify_textures, RW_OT_fix_anisotropic, RW_OT_apply_v21_defaults)
+class RW_OT_refresh_base(bpy.types.Operator):
+    """Recapture the base material's height and AO maps and their normalisation (after swapping its
+    textures). Layers and paint are not touched"""
+    bl_idname = "realworn.refresh_base"
+    bl_label = "Refresh Base"
+    bl_options = {"REGISTER", "UNDO"}
+
+    material: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        from ..core import detail
+        from .common import resolve_material
+        _, mat = resolve_material(context, material_name=self.material)
+        if mat is None or not mat.realworn.applied:
+            self.report({"WARNING"}, "Select a set-up object")
+            return {"CANCELLED"}
+        h, ao = detail.refresh_base(mat)
+        self.report({"INFO"}, "{}: base height {}, AO {}".format(mat.name, h.lower(), ao.lower()))
+        return {"FINISHED"}
+
+
+class RW_OT_pick_ao(bpy.types.Operator):
+    """Pick the base material's ambient occlusion map (Base AO is available once one is set)"""
+    bl_idname = "realworn.pick_ao"
+    bl_label = "Pick AO Image"
+    bl_options = {"REGISTER", "UNDO"}
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+    filter_image: bpy.props.BoolProperty(default=True, options={"HIDDEN"})
+    material: bpy.props.StringProperty(default="")
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        import os
+        from ..core import compiler, detail
+        from .common import resolve_material
+        _, mat = resolve_material(context, material_name=self.material)
+        if mat is None or not mat.realworn.applied or not os.path.isfile(self.filepath):
+            self.report({"WARNING"}, "Pick an image file for a set-up material")
+            return {"CANCELLED"}
+        img = bpy.data.images.load(self.filepath, check_existing=True)
+        detail.link_ao(mat, img)
+        detail.capture_ao(mat)
+        compiler.compile(mat)
+        self.report({"INFO"}, "Base AO: {}".format(img.name))
+        return {"FINISHED"}
+
+
+_classes = (RW_OT_fix_texture_limit, RW_OT_fix_simplify_textures, RW_OT_fix_anisotropic, RW_OT_apply_v21_defaults,
+            RW_OT_refresh_base, RW_OT_pick_ao)
 
 
 def register():

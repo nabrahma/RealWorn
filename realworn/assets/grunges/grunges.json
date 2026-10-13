@@ -1,0 +1,68 @@
+{
+ "breakup_fine.png": {
+  "size_m": 0.12
+ },
+ "breakup_rust.png": {
+  "size_m": 0.25
+ },
+ "chips_large.png": {
+  "size_m": 0.4
+ },
+ "chips_small.png": {
+  "size_m": 0.2
+ },
+ "concrete_pores.png": {
+  "size_m": 0.3
+ },
+ "cracks.png": {
+  "size_m": 0.6
+ },
+ "dust.png": {
+  "size_m": 0.5
+ },
+ "edge_scuffs.png": {
+  "size_m": 0.3
+ },
+ "grime_clouds.png": {
+  "size_m": 0.6
+ },
+ "leaks.png": {
+  "size_m": 1.0
+ },
+ "rust_spots.png": {
+  "size_m": 0.4
+ },
+ "scratches_fine.png": {
+  "size_m": 0.3
+ },
+ "scratches_heavy.png": {
+  "size_m": 0.5
+ },
+ "smudge.png": {
+  "size_m": 0.6
+ },
+ "speckle_coarse.png": {
+  "size_m": 0.3
+ },
+ "speckle_fine.png": {
+  "size_m": 0.15
+ },
+ "spots_fine.png": {
+  "size_m": 0.2
+ },
+ "spots_large.png": {
+  "size_m": 0.8
+ },
+ "spots_medium.png": {
+  "size_m": 0.4
+ },
+ "stain_rings.png": {
+  "size_m": 0.5
+ },
+ "streaks_drips.png": {
+  "size_m": 0.8
+ },
+ "streaks_vertical.png": {
+  "size_m": 1.0
+ }
+}

@@ -13,6 +13,16 @@ import numpy as np
 SIZE = 2048
 REF = 512  # the size the recipes were tuned at; pixel-sized parameters scale by SIZE / REF
 
+# SRC-7: suggested real-world size of one tile, in metres (chips are centimetres, stains and
+# leaks tens of centimetres). Written next to the images as grunges.json.
+SUGGESTED_SIZE = {
+    "breakup_fine": 0.12, "breakup_rust": 0.25, "chips_large": 0.4, "chips_small": 0.2, "concrete_pores": 0.3,
+    "cracks": 0.6, "dust": 0.5, "edge_scuffs": 0.3, "grime_clouds": 0.6, "leaks": 1.0, "rust_spots": 0.4,
+    "scratches_fine": 0.3, "scratches_heavy": 0.5, "smudge": 0.6, "speckle_coarse": 0.3, "speckle_fine": 0.15,
+    "spots_fine": 0.2, "spots_large": 0.8, "spots_medium": 0.4, "stain_rings": 0.5, "streaks_drips": 0.8,
+    "streaks_vertical": 1.0,
+}
+
 
 # ------------------------------------------------------------------ noises
 def value_noise(rng, n, cells, octaves=4, persistence=0.5):
@@ -202,4 +212,7 @@ def generate(out_dir, n=SIZE):
         bpy.data.images.remove(img)
         names.append(name + ".png")
     bpy.data.scenes.remove(scene)
+    import json
+    with open(os.path.join(out_dir, "grunges.json"), "w", encoding="utf-8") as fh:
+        json.dump({k + ".png": {"size_m": v} for k, v in sorted(SUGGESTED_SIZE.items())}, fh, indent=1)
     return names

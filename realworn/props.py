@@ -50,7 +50,10 @@ DETAIL_MODE_ITEMS = [
     ("HEIGHT", "Height Compare", "The stroke is a water level against the detail as terrain: fills low spots first")]
 DETAIL_SOURCE_ITEMS = [
     ("LAYER_GRUNGE", "Layer Grunge", "The grunge image below, box-projected in object space"),
-    ("BASE_HEIGHT", "Base Height", "The base material's height map (falls back to the grunge without one)")]
+    ("BASE_HEIGHT", "Base Height", "The base material's height map (falls back to the grunge without one)"),
+    ("BASE_AO", "Base AO", "The base material's ambient occlusion map: dark crevices of the texture"),
+    ("CONTENT_HEIGHT", "Content Height", "This layer's own PBR set height map"),
+    ("GRUNGE2", "Second Grunge", "The second grunge image only (a different breakup from the stroke grunge)")]
 RES_ITEMS = [(str(r), str(r), "") for r in (256, 512, 1024, 2048, 4096)]
 EXPORT_ITEMS = [("UNITY_URP", "Unity URP", "BaseMap, MetallicSmoothness, Normal (OpenGL)"),
                 ("UNITY_HDRP", "Unity HDRP", "BaseColor, MaskMap (M, AO, Detail, Smoothness), Normal (OpenGL)"),
@@ -216,6 +219,14 @@ class RWDetail(bpy.types.PropertyGroup):
     offset: FloatProperty(name="Offset", default=0.0, update=_v("offset"))
     cubic: BoolProperty(name="Cubic", default=False, update=_struct,
                         description="Cubic interpolation: magnified grunge stays smooth in extreme close-ups")
+    image2: PointerProperty(name="Second Grunge", type=bpy.types.Image, update=_struct,
+                            description="A second breakup mixed into any source (two scales of breakup)")
+    scale2: FloatProperty(name="Scale 2", default=0.08, min=0.001, soft_max=10.0, subtype="DISTANCE",
+                          update=_v("scale2"))
+    mix2: FloatProperty(name="Mix", default=0.0, min=0.0, max=1.0, update=_v("mix2"),
+                        description="How much the second grunge varies the detail (0: off, no nodes)")
+    anti_tile: BoolProperty(name="Anti-Tiling", default=False, update=_struct,
+                            description="Random rotation and offset per cell so a small grunge does not visibly repeat")
 
 
 class RWLayer(bpy.types.PropertyGroup):
@@ -278,6 +289,10 @@ class RW_MaterialProps(bpy.types.PropertyGroup):
     # v2.1
     v21: BoolProperty(name="v2.1 Defaults", default=False,
                       description="New layers get the v2.1 Edge Detail defaults (set by Setup or Apply v2.1 Defaults)")
+    base_ao_kind: StringProperty(name="Base AO", default="", description="IMAGE or NONE (captured)")
+    base_ao_image: StringProperty(name="Base AO Image", default="")
+    base_ao_lo: FloatProperty(name="AO Low", default=0.0, update=_mat_v("base_ao_lo"))
+    base_ao_hi: FloatProperty(name="AO High", default=1.0, update=_mat_v("base_ao_hi"))
     base_height_kind: StringProperty(name="Base Height", default="",
                                      description="IMAGE, SOCKET or NONE: what the base's height is (captured)")
     base_height_image: StringProperty(name="Base Height Image", default="")

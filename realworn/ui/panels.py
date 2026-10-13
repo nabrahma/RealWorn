@@ -210,20 +210,41 @@ def draw_edge_detail(layout, mat, layer):
     used, _ = detail.resolve(mat, layer)
     if det.source == "BASE_HEIGHT" and used != "BASE_HEIGHT":
         box.label(text="No base height map: using the grunge", icon="INFO")
+    if det.source == "BASE_AO" and used != "BASE_AO":
+        box.label(text="No AO map found: using the grunge", icon="INFO")
+        opx(box, "realworn.pick_ao", icon="FILEBROWSER").material = mat.name
+    if det.source == "CONTENT_HEIGHT" and used != "CONTENT_HEIGHT":
+        box.label(text="This layer has no height image: using the grunge", icon="INFO")
     if used is None:
         box.label(text="Pick a grunge image to use Edge Detail", icon="ERROR")
-    if used == "BASE_HEIGHT":
+    if used in ("BASE_HEIGHT", "BASE_AO"):
         st = mat.realworn
+        key = "base_height" if used == "BASE_HEIGHT" else "base_ao"
         r = box.row(align=True)
-        r.prop(st, "base_height_lo", text="Low")
-        r.prop(st, "base_height_hi", text="High")
-    if used != "BASE_HEIGHT" or det.source == "LAYER_GRUNGE":
+        r.prop(st, key + "_lo", text="Low")
+        r.prop(st, key + "_hi", text="High")
+        opx(r, "realworn.refresh_base", text="", icon="FILE_REFRESH").material = mat.name
+    if used == "GRUNGE2":
+        box.template_ID(det, "image2", open="image.open")
+        box.prop(det, "scale2")
+    elif used in ("LAYER_GRUNGE", None):
         box.template_ID(det, "image", open="image.open")
         r = box.row(align=True)
         r.prop(det, "scale")
         r.prop(det, "rotation", text="")
         r.prop(det, "offset", text="")
-        box.prop(det, "cubic")
+    if used in ("LAYER_GRUNGE", "GRUNGE2"):
+        r = box.row(align=True)
+        r.prop(det, "cubic", toggle=True)
+        r.prop(det, "anti_tile", toggle=True)
+    if used != "GRUNGE2":
+        sub = box.box()
+        r = sub.row(align=True)
+        r.label(text="Second Grunge")
+        r.prop(det, "mix2", slider=True, text="")
+        if det.mix2 > 0 or det.image2 is not None:
+            sub.template_ID(det, "image2", open="image.open")
+            sub.prop(det, "scale2")
     r = box.row(align=True)
     r.prop(det, "width", slider=True)
     r.prop(det, "threshold", slider=True)

@@ -83,23 +83,24 @@ LAYER_DEFAULTS = {"use_height_blend": False, "height_blend": 0.0, "lock_source":
 DETAIL_MODES = ("ERODE", "BURN", "HEIGHT")
 DETAIL_SOURCES = ("LAYER_GRUNGE", "BASE_HEIGHT", "BASE_AO", "CONTENT_HEIGHT", "GRUNGE2")
 DETAIL_OFF = {"mode": "ERODE", "source": "LAYER_GRUNGE", "strength": 0.0, "width": 0.05, "threshold": 0.5,
-              "protect": True, "grunge": None, "scale": 0.25}
+              "protect": True, "grunge": None, "scale": 0.25, "grunge2": None, "mix2": 0.0}
 
 
-def _det(mode, source, strength, width, protect, grunge, scale):
+def _det(mode, source, strength, width, protect, grunge, scale, grunge2=None, mix2=0.0):
     return {"mode": mode, "source": source, "strength": strength, "width": width, "threshold": 0.5,
-            "protect": protect, "grunge": grunge, "scale": scale}
+            "protect": protect, "grunge": grunge, "scale": scale, "grunge2": grunge2, "mix2": mix2}
 
 
 # PRD v2.1 "Defaults per layer type". `grunge` is the Layer Grunge (and the Base Height fallback
 # when the base has no height map); `scale` is its tile size in metres (SRC-7 suggested sizes).
 DETAIL = {
-    "DIRT": _det("HEIGHT", "BASE_HEIGHT", 0.7, 0.05, False, "grime_clouds", 0.3),
+    # Dirt and Water also mix a fine breakup in, so their edge is irregular where the base is flat
+    "DIRT": _det("HEIGHT", "BASE_HEIGHT", 0.7, 0.05, False, "grime_clouds", 0.3, "breakup_fine", 0.3),
     "DUST": _det("ERODE", "LAYER_GRUNGE", 0.5, 0.10, False, "speckle_fine", 0.25),
     "RUST": _det("ERODE", "LAYER_GRUNGE", 0.8, 0.04, False, "breakup_rust", 0.25),
     "WEAR": _det("ERODE", "LAYER_GRUNGE", 0.8, 0.02, True, "chips_small", 0.2),
     "SCRATCHES": _det("ERODE", "LAYER_GRUNGE", 0.9, 0.02, True, "scratches_fine", 0.3),
-    "WATER": _det("HEIGHT", "BASE_HEIGHT", 0.8, 0.03, False, "smudge", 0.5),
+    "WATER": _det("HEIGHT", "BASE_HEIGHT", 0.8, 0.03, False, "smudge", 0.5, "breakup_fine", 0.2),
     "DAMAGE": _det("ERODE", "BASE_HEIGHT", 0.7, 0.03, True, "chips_small", 0.2),
 }
 

@@ -157,6 +157,34 @@ def _path(name):
     raise KeyError("grunge '{}' not in the library".format(name))
 
 
+def suggested_scale(image_or_name, default=None):
+    """SRC-7: suggested tile size in metres for a grunge, from grunges.json next to it (bundled
+    library or the user's folder; {"name.png": {"size_m": 0.3}}) or a "<name>.json" sidecar."""
+    import json
+    if hasattr(image_or_name, "filepath"):
+        path = bpy.path.abspath(image_or_name.filepath) if image_or_name.filepath else ""
+        name = os.path.basename(path) or image_or_name.name
+    else:
+        name = image_or_name if image_or_name.lower().endswith(".png") else image_or_name + ".png"
+        try:
+            path = _path(name)
+        except KeyError:
+            return default
+    folder = os.path.dirname(path)
+    for meta, key in ((os.path.join(folder, "grunges.json"), name),
+                      (os.path.join(folder, os.path.splitext(name)[0] + ".json"), None)):
+        if folder and os.path.exists(meta):
+            try:
+                with open(meta, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            entry = data.get(key) if key else data
+            if isinstance(entry, dict) and "size_m" in entry:
+                return float(entry["size_m"])
+    return default
+
+
 def load(name):
     """The grunge image (Non-Color, reused if already loaded)."""
     path = _path(name)
@@ -183,7 +211,7 @@ def set_texture_look(brush, contrast=1.0, invert=False):
     return True
 
 
-def use(mode, name, obj=None, mat=None, layer=None, contrast=1.0, invert=False, amount=1.0, scale=1.0):
+def use(mode, name, obj=None, mat=None, layer=None, contrast=1.0, invert=False, amount=1.0, scale=None):
     """Apply grunge `name` in `mode`:
     STAMP     brush Texture Mask with Random mapping and random angle (GRN-2)
     PROJECTED brush Texture Mask with View Plane mapping (GRN-3)
@@ -198,7 +226,7 @@ def use(mode, name, obj=None, mat=None, layer=None, contrast=1.0, invert=False, 
             ing.kind = "GRUNGE"
             ing.image = img
             ing.amount = amount
-            ing.scale = scale
+            ing.scale = scale if scale is not None else suggested_scale(img, 1.0)  # SRC-7
             ing.contrast = max(-1.0, min(1.0, contrast - 1.0))
             ing.invert = invert
         compiler.compile(mat)
