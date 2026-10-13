@@ -25,6 +25,7 @@ from . import naming
 from ..builders._dsl import SOCKET_TYPES, Tree
 
 _suspended = set()
+SOURCE_VIEW = {}  # material name -> layer id: Mask View shows that layer's raw source (Bake Edges and AO)
 COMPILES = {"count": 0}  # tests read this to prove value edits do not recompile
 BOX_BLEND = 0.3          # SET-3: the tutorial's Box projection blend
 _LAYER_PATH = re.compile(r"^realworn\.layers\[(\d+)\](?:\.(texture))?$")
@@ -101,6 +102,7 @@ class _B(Tree):
         self.n = 0
         self._mark = 0
         self.base_channels = {}
+        self.source_view = None
 
     def begin(self, lid):
         self.lid = lid
@@ -287,33 +289,38 @@ def _ao_source(b, layer):
     return b.ramp("ao.ramp", ao.outputs["AO"], ((lo, 1.0), (hi, 0.0)))
 
 
+
+
 def source(b, layer):
-    """The layer's mask source S, or None when nothing can show."""
+    """(S, raw): the layer's mask source S, and S without Edge Wear / Dirt touch-up paint (what Bake
+    Edges and AO bakes). (None, None) when nothing can show."""
     kind = layer.kind
     if kind == "VARIATION":
-        return (1.0, 1.0, 1.0, 1.0)
+        return (1.0, 1.0, 1.0, 1.0), None
     if kind in ("PAINT", "REVEAL"):
-        return _painted(b, layer)
+        s = _painted(b, layer)
+        return s, s
     if kind == "DECALS":
-        return _painted(b, layer, "Alpha")
+        s = _painted(b, layer, "Alpha")
+        return s, s
     if layer.edge_source == "BAKED" and layer.baked_image is not None:
-        s = _image(b, "baked", layer.baked_image, _paint_uv(b), box=False).outputs["Color"]
+        raw = _image(b, "baked", layer.baked_image, _paint_uv(b), box=False).outputs["Color"]
     elif kind == "EDGE_WEAR":
-        s = _edge_source(b, layer)
+        raw = _edge_source(b, layer)
     else:
-        s = _ao_source(b, layer)
-    painted = _painted(b, layer)
-    if painted is not None:  # EDW-3 / DRT-3: touch-ups on top
-        s = b.max(s, painted)
-    return s
+        raw = _ao_source(b, layer)
+    touch = _painted(b, layer)
+    return (b.max(raw, touch) if touch is not None else raw), raw  # EDW-3 / DRT-3: touch-ups on top
 
 
 def build_mask(b, layer):
     """MSK-1: M = ramp_{t,w}(S - a ramp_g(G)) x opacity, as real Mix (Subtract) and Color Ramp
     nodes. None when the layer has nothing to show."""
-    S = source(b, layer)
+    S, raw = source(b, layer)
     if S is None:
         return None
+    if raw is not None and SOURCE_VIEW.get(layer.id_data.name) == layer.id:
+        b.source_view = b.math("ADD", raw, 0.0, clamp=True)  # Bake Edges and AO reads this
     if layer.breakup_amount > 0 and layer.breakup_grunge is not None and layer.kind != "EDGE_WEAR":
         g = b.ramp("breakup.ramp", _grunge(b, layer), ((K.breakup_stops(layer.breakup_contrast)[0], 0.0),
                                                       (K.breakup_stops(layer.breakup_contrast)[1], 1.0)))
@@ -431,12 +438,15 @@ def compile(mat):
         if not layer.visible:
             continue
         b.begin(layer.id)
+        b.source_view = None
         mask = build_mask(b, layer)
+        if b.source_view is not None:
+            ctx["mask_view"] = b.source_view
         if mask is not None:
             lay = content(b, layer, cur)
             blend(b, layer, mask, lay, cur, ctx)
             ctx["coverage"] = mask if ctx["coverage"] is None else b.max(ctx["coverage"], mask)
-            if st.mask_view and idx == active and not st.base_active:
+            if st.mask_view and idx == active and not st.base_active and b.source_view is None:
                 ctx["mask_view"] = mask
         b.end(600 * (idx + 1), "{}: {}".format(K.label(layer.kind), layer.name))
     b.begin("stack")

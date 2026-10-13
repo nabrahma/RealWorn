@@ -14,7 +14,7 @@ def record(name, value, unit, budget=None, note=""):
     if os.path.exists(STORE):
         with open(STORE, encoding="utf-8") as fh:
             data = json.load(fh)
-    data[name] = {"value": round(float(value), 3), "unit": unit, "budget": budget, "note": note,
+    data[name] = {"value": float("{:.4g}".format(float(value))), "unit": unit, "budget": budget, "note": note,
                   "date": datetime.date.today().isoformat()}
     with open(STORE, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=1, sort_keys=True)
@@ -23,7 +23,8 @@ def record(name, value, unit, budget=None, note=""):
         d = data[k]
         ok = "" if d["budget"] is None else ("yes" if d["value"] <= d["budget"] else "NO")
         bud = "" if d["budget"] is None else "{} {}".format(d["budget"], d["unit"])
-        rows.append("| {} | {} {} | {} | {} | {} | {} |".format(k, d["value"], d["unit"], bud, ok, d["date"], d["note"]))
+        rows.append("| {} | {:.4g} {} | {} | {} | {} | {} |".format(k, d["value"], d["unit"], bud, ok, d["date"],
+                                                                  d["note"]))
     with open(DOC, encoding="utf-8") as fh:
         text = fh.read()
     a, b = text.index("<!-- PERF:BEGIN -->"), text.index("<!-- PERF:END -->")

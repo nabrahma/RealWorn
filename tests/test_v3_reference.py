@@ -111,3 +111,12 @@ def test_r3_up_to_decals(empty_scene, out_dir):
     mat = wall.material_slots[0].material
     assert [ly.kind for ly in mat.realworn.layers][-1] == "DECALS"
     assert mad < MAD_MAX and block < BLOCK_MAX
+
+
+# ------------------------------------------------------------------ R4
+def test_r4_full_reference(empty_scene, out_dir):
+    """The full reference wall: every step of the tutorial (REF-3 on the whole reference)."""
+    mad, block, wall = compare_stage(empty_scene, out_dir, "R4", "dirt")
+    mat = wall.material_slots[0].material
+    assert [ly.kind for ly in mat.realworn.layers] == ["VARIATION"] * 4 + ["PAINT", "EDGE_WEAR", "REVEAL", "DECALS", "DIRT"]
+    assert mad < MAD_MAX and block < BLOCK_MAX

@@ -10,7 +10,7 @@ import bpy
 from realworn.core import kinds as K
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NOT_YET = {"bake_sources", "convert_v2"}  # R4 Bake Edges and AO, R5 v2.x conversion
+NOT_YET = {"convert_v2"}  # R5 v2.x conversion
 
 
 def _sources():

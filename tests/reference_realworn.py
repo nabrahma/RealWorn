@@ -96,12 +96,33 @@ def realworn_look(wall, upto, skip=()):
         ly.threshold, ly.sharpness = ramp_stops_sliders(R.REVEAL["black"], R.REVEAL["white"])
         ly.edge_dark = 0.0  # REV-6 is RealWorn's one extra over the tutorial
         ly.mask_res = 2048
+    if on("edges"):  # Bevel . Normal through a ramp; the grunge through a Map Range into the radius
+        bpy.ops.realworn.layer_add(material=m, kind="EDGE_WEAR")
+        ly = _layer(mat)
+        h, s_, v_ = R.EDGES["hsv"]
+        ly.content = "TINT_BELOW"  # the tutorial's lighter, less saturated copy of the base
+        ly.hue, ly.saturation, ly.value = h - 0.5, s_ - 1.0, v_ - 1.0
+        lo, hi = R.EDGES["radius"]
+        ly.width_mm, ly.breakup_amount = hi * 1000.0, 1.0 - lo / hi
+        _grunge(mat, ly, R.EDGES["grunge"], R.EDGES["size"], R.EDGES["offset"])
+        ly.bevel_samples = R.BEVEL_SAMPLES
+        # the reference's Color Ramp on the dot product (white at `white`, black at `black`) is the
+        # outer ramp on S = (1 - dot) x 10: black stop at (1 - black) x 10, white at (1 - white) x 10
+        ly.threshold, ly.sharpness = ramp_stops_sliders((1 - R.EDGES["black"]) * 10, (1 - R.EDGES["white"]) * 10)
     if on("decals"):  # one RGBA image painted with drips: colour into a Principled, alpha as the mask
         bpy.ops.realworn.layer_add(material=m, kind="DECALS")
         ly = _layer(mat)
         ly.decal_res = "2048"
         ly.roughness = R.DECAL["roughness"]
         ly.decal_blend = "NORMAL"
+    if on("dirt"):  # AO, Color Ramp, Less Than a grunge through a Map Range: Sharpness 1 is the Less Than
+        bpy.ops.realworn.layer_add(material=m, kind="DIRT")
+        ly = _layer(mat)
+        ly.distance_cm = R.DIRT["distance"] * 100.0
+        ly.color, ly.roughness = R.DIRT["color"], R.DIRT["roughness"]
+        _grunge(mat, ly, R.DIRT["grunge"], R.DIRT["size"], R.DIRT["offset"])
+        m0, m1 = R.DIRT["map_to"]
+        ly.threshold, ly.breakup_amount, ly.breakup_contrast, ly.sharpness = 1.0 - m0, m0 - m1, 0.0, 1.0
     return mat
 
 

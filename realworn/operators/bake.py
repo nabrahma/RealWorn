@@ -85,6 +85,33 @@ class RW_OT_export_textures(_Mat, bpy.types.Operator):
         return {"FINISHED"}
 
 
+class RW_OT_bake_sources(_Mat, bpy.types.Operator):
+    """Bake the Edge Wear and Dirt masks (Bevel and AO) to images on RW_Paint and switch those layers
+    to Baked: they then look the same in EEVEE and render faster. Re-bake after changing the mesh"""
+    bl_idname = "realworn.bake_sources"
+    bl_label = "Bake Edges and AO"
+    bl_options = {"REGISTER", "UNDO"}
+
+    layer: StringProperty(name="Layer ID", default="", description="Empty: every Edge Wear and Dirt layer")
+    resolution: IntProperty(name="Resolution", default=0, description="0: the mask texel density")
+
+    def execute(self, context):
+        ob, mat = self._resolve(context)
+        if mat is None:
+            return {"CANCELLED"}
+        ids = [self.layer] if self.layer else None
+        try:
+            done = bake.bake_sources(ob, mat, context.scene, ids, self.resolution or None)
+        except (bake.BakeError, RuntimeError) as ex:
+            self.report({"ERROR"}, str(ex))
+            return {"CANCELLED"}
+        if not done:
+            self.report({"WARNING"}, "No Edge Wear or Dirt layer to bake")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Baked {} mask(s)".format(len(done)))
+        return {"FINISHED"}
+
+
 class RW_OT_migrate_v07(bpy.types.Operator):
     """This file was weathered with RealWorn v0.7: restore its materials exactly and remove v0.7 data, so
     the objects can be set up for painting"""
@@ -100,7 +127,7 @@ class RW_OT_migrate_v07(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_bake, RW_OT_restore_live, RW_OT_export_textures, RW_OT_migrate_v07)
+_classes = (RW_OT_bake, RW_OT_restore_live, RW_OT_export_textures, RW_OT_bake_sources, RW_OT_migrate_v07)
 
 
 def register():

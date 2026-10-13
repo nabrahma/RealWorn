@@ -198,7 +198,10 @@ def draw_layer(layout, context, ob, mat, layer):
             col.label(text="Low for a large building: use 8K or split it into parts")
     if layer.kind in ("EDGE_WEAR", "DIRT"):
         col.row().prop(layer, "edge_source", expand=True)
-        op(col, "realworn.bake_sources", text="Bake Edges and AO", icon="RENDER_STILL")
+        o = op(col, "realworn.bake_sources", text="Bake Edges and AO", icon="RENDER_STILL")
+        o.layer = layer.id
+        if layer.edge_source == "BAKED" and layer.baked_image is None:
+            col.label(text="Not baked yet: showing the live mask", icon="INFO")
     # Breakup
     col = box.column(align=True)
     row = col.row(align=True)

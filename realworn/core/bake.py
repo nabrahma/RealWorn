@@ -69,10 +69,14 @@ def run(scene, obj, mats, img, bake_type="EMIT", samples=4, margin=8):
     r = scene.render
     vl = bpy.context.view_layer
     saved = {"engine": r.engine, "samples": scene.cycles.samples, "denoise": scene.cycles.use_denoising,
-             "device": scene.cycles.device, "active": vl.objects.active,
+             "device": scene.cycles.device, "active": vl.objects.active, "tile": scene.cycles.tile_size,
              "selected": [o for o in vl.objects if o.select_get()], "hide_render": obj.hide_render}
     r.engine = "CYCLES"
     scene.cycles.samples = samples
+    # In an interactive session Blender 5.2.1 bakes nothing into an image larger than the render
+    # tile (default 2048 px): the bake reports success and leaves the image black. Headless bakes
+    # are fine. A tile as large as the image works around it (found in v3 R4, live).
+    scene.cycles.tile_size = max(scene.cycles.tile_size, max(img.size))
     scene.cycles.use_denoising = False
     obj.hide_render = False
     for o in saved["selected"]:
@@ -97,6 +101,7 @@ def run(scene, obj, mats, img, bake_type="EMIT", samples=4, margin=8):
     finally:
         _drop_targets(mats)
         r.engine, scene.cycles.samples = saved["engine"], saved["samples"]
+        scene.cycles.tile_size = saved["tile"]
         scene.cycles.use_denoising, scene.cycles.device = saved["denoise"], saved["device"]
         obj.hide_render = saved["hide_render"]
         obj.select_set(False)
@@ -334,3 +339,43 @@ def export_textures(mat, folder, preset="UNREAL", name=None):
         bpy.data.images.remove(img)
         paths.append(path)
     return paths
+
+
+# ================================================================ Bake Edges and AO
+SOURCE_KINDS = ("EDGE_WEAR", "DIRT")
+
+
+def bake_sources(obj, mat, scene=None, layer_ids=None, resolution=None, samples=32):
+    """ENG-2: bake the Edge Wear and Dirt sources (Bevel / AO, before Breakup and Sharpness, which
+    stay live) to float images on RW_Paint and switch those layers to Baked. Re-bake after
+    changing the mesh. Returns {layer id: image}."""
+    scene = scene or bpy.context.scene
+    st = mat.realworn
+    targets = [ly for ly in st.layers if ly.kind in SOURCE_KINDS and (layer_ids is None or ly.id in layer_ids)]
+    res = resolution or images.texel_resolution(obj)
+    done = {}
+    saved = [(ly.id, ly.edge_source) for ly in targets]
+    try:
+        with compiler.batch(mat):
+            for ly in targets:
+                ly.edge_source = "LIVE"  # bake what the live nodes produce
+        for ly in targets:
+            compiler.SOURCE_VIEW[mat.name] = ly.id
+            compiler.compile(mat)
+            name = naming.mask_image_name(obj.name, ly.name, "baked")
+            img = new_image(name, res, "Non-Color", float_buffer=True)
+            bake_socket(scene, obj, mat, stack_output("Mask View"), img, samples=samples)
+            img[naming.IMG_BAKED_SOURCE] = "{}/{}".format(obj.name, ly.id)
+            images.store(img, obj)
+            done[ly.id] = img
+    finally:
+        compiler.SOURCE_VIEW.pop(mat.name, None)
+        with compiler.batch(mat):
+            for lid, src in saved:
+                ly = compiler.layer_by_id(mat, lid)
+                if lid in done:
+                    ly.baked_image, ly.edge_source = done[lid], "BAKED"
+                else:
+                    ly.edge_source = src
+        compiler.compile(mat)
+    return done
