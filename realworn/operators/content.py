@@ -19,7 +19,8 @@ class RW_OT_pbrset_load(bpy.types.Operator):
     directory: StringProperty(subtype="DIR_PATH")
     files: CollectionProperty(type=bpy.types.OperatorFileListElement)
     filter_image: bpy.props.BoolProperty(default=True, options={"HIDDEN"})
-    scale: FloatProperty(name="Scale (m)", default=1.0, min=0.01, soft_max=20.0)
+    scale: FloatProperty(name="Scale (m)", default=0.0, min=0.0, soft_max=20.0,
+                         description="Size of one texture tile in metres (0: from the folder name, e.g. 2K_1m, else 1 m)")
     object: StringProperty(name="Object", default="")
     material: StringProperty(name="Material", default="")
     layer: StringProperty(name="Layer ID", default="")
@@ -36,7 +37,7 @@ class RW_OT_pbrset_load(bpy.types.Operator):
         layer = mat.realworn.layers[resolve_layer(mat, self.layer)]
         names = [f.name for f in self.files if f.name]
         src = [os.path.join(self.directory, n) for n in names] if names else self.directory
-        done = pbrset.assign(mat, layer, src, self.scale)
+        done = pbrset.assign(mat, layer, src, self.scale or None)
         if not done:
             self.report({"WARNING"}, "No PBR maps recognised in {}".format(self.directory))
             return {"CANCELLED"}
@@ -44,7 +45,29 @@ class RW_OT_pbrset_load(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_pbrset_load,)
+class RW_OT_content_load(bpy.types.Operator):
+    """Use the selected content library set as this layer's content (CNT-6)"""
+    bl_idname = "realworn.content_load"
+    bl_label = "Use PBR Set"
+    bl_options = {"REGISTER", "UNDO"}
+
+    path: StringProperty(name="Set Folder", default="")
+    material: StringProperty(name="Material", default="")
+    layer: StringProperty(name="Layer ID", default="")
+
+    def execute(self, context):
+        ob, mat = resolve_material(context, "", self.material)
+        path = self.path or context.scene.realworn.content_set
+        if mat is None or not injector.is_setup(mat) or not len(mat.realworn.layers) or not os.path.isdir(path):
+            self.report({"WARNING"}, "Select a layer and a set from the content library")
+            return {"CANCELLED"}
+        layer = mat.realworn.layers[resolve_layer(mat, self.layer)]
+        done = pbrset.assign(mat, layer, path)
+        self.report({"INFO"}, "{}: {}".format(layer.name, ", ".join(done)) if done else "No maps recognised")
+        return {"FINISHED"} if done else {"CANCELLED"}
+
+
+_classes = (RW_OT_pbrset_load, RW_OT_content_load)
 
 
 class RW_OT_damage_apply(bpy.types.Operator):
@@ -102,3 +125,4 @@ def register():
 def unregister():
     for c in reversed(_classes):
         bpy.utils.unregister_class(c)
+    pbrset.free_previews()

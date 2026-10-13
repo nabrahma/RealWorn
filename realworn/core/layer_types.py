@@ -105,6 +105,23 @@ DETAIL = {
 }
 
 
+# PRD v2.1 CNT-3: content look defaults (colour and roughness come from the layer's channels)
+LOOK = {
+    "DIRT": {"color_var": 0.5, "rough_var": 0.4, "micro": 0.6, "scale": 0.3},
+    "DUST": {"color_var": 0.25, "rough_var": 0.5, "micro": 0.0, "scale": 0.4},
+    "RUST": {"color_var": 0.45, "rough_var": 0.5, "micro": 0.8, "scale": 0.25},
+    "WEAR": {"color_var": 0.2, "rough_var": 0.5, "micro": 0.5, "scale": 0.5},
+    "SCRATCHES": {"color_var": 0.1, "rough_var": 0.4, "micro": 0.6, "scale": 0.3},
+    "WATER": {"color_var": 0.0, "rough_var": 0.5, "micro": 0.3, "scale": 0.5},
+    "DAMAGE": {"color_var": 0.4, "rough_var": 0.3, "micro": 0.7, "scale": 0.2},
+}
+
+
+def look_defaults(kind):
+    """Content look defaults, or None for types without a look (Paint, Decal, Custom)."""
+    return dict(LOOK[kind]) if kind in LOOK else None
+
+
 def detail_defaults(kind):
     """Edge Detail defaults for a layer type (Paint, Decal, Custom: off)."""
     return dict(DETAIL.get(kind, DETAIL_OFF))

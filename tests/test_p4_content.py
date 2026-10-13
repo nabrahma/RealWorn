@@ -65,7 +65,8 @@ def test_pbr_detection_names():
     det = pbrset.detect(["/x/" + f for f in files])
     assert {k: os.path.basename(v) for k, v in det.items()} == {
         "color": "wall_diff_1k.jpg", "roughness": "wall_rough_1k.exr", "normal": "wall_nor_gl_1k.exr",
-        "height": "wall_disp_1k.png", "metallic": "wall_metal_1k.exr"}
+        "height": "wall_disp_1k.png", "metallic": "wall_metal_1k.exr",
+        "ao": "wall_ao_1k.jpg"}  # v2.1 CNT-5: AO maps are used too
     assert pbrset.classify("Bricks_BaseColor.png") == "color"
     assert pbrset.classify("T_Rock_Albedo.tga") == "color"
     assert pbrset.classify("rock_Roughness.png") == "roughness"

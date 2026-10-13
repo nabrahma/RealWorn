@@ -1,7 +1,14 @@
 {
  "schema": 2,
- "build": "66f147b5c076",
+ "build": "0fcfd02a82ca",
  "groups": [
+  "RW_Content_Damage",
+  "RW_Content_Dirt",
+  "RW_Content_Dust",
+  "RW_Content_Rust",
+  "RW_Content_Scratches",
+  "RW_Content_Water",
+  "RW_Content_Wear",
   "RW_Damage",
   "RW_DecalProject",
   "RW_Masks",

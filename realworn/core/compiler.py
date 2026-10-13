@@ -264,6 +264,7 @@ def edge_detail(b, layer, m):
         d = b.clamp(b.add(d, b.mul(b.sub(d2, 0.5), b.value_node("edge.mix2", det.mix2))))
     d = b.outp(b.group(naming.SH_CONTRAST, "edge.contrast", Value=d, Contrast=det.contrast,
                        Invert=1.0 if det.invert else 0.0))
+    b.detail_d = d  # the content look's Grunge input (CNT-3 Rust pitting, Scratches grooves)
     kw = dict(Mask=m, Detail=d, Strength=det.strength, Width=det.width, Threshold=det.threshold)
     if det.mode == "ERODE":
         kw["Protect"] = 1.0 if det.protect else 0.0
@@ -328,6 +329,8 @@ def _channel_source(b, layer, name, ch, scalar):
     if ch.source in ("IMAGE", "PBRSET") and ch.image is not None:
         img = _channel_image(b, name, ch, scalar)
         out = img.outputs["Color"]
+        if ch.invert:  # glossiness used as roughness
+            out = b.sub(1.0, out)
         if name == "height":  # image height (0..1) scaled by the channel value in mm
             out = b.mul(out, b.value_node(role + ".value", ch.value))
         return out
@@ -361,13 +364,34 @@ def _blend_height(b, mode, mask, cur, val):
     return b.add(cur, b.mul(mask, val))
 
 
+def _look(b, layer, mask):
+    """CNT-1: the layer's RW_Content_<Type> group (None when off or the type has no look)."""
+    lk = layer.look
+    if not lk.enabled or layer.type not in naming.CONTENT_TYPES:
+        return None
+    mat = layer.id_data
+    from . import detail
+    bh = base_height_norm(b, mat) if detail.has_base_height(mat) else 0.5
+    edge = b.pre_detail if b.pre_detail is not None else mask
+    return b.group(naming.content_group(layer.type), "look", Mask=mask, Edge_Mask=edge, Base_Height=bh,
+                   Grunge=b.detail_d if b.detail_d is not None else 0.5, Color_Variation=lk.color_var,
+                   Roughness_Variation=lk.rough_var, Micro=lk.micro, Scale=lk.scale)
+
+
 def apply_content(b, layer, mask, cur, ctx):
     """Blend the layer's enabled channels over `cur` (dict of sockets), in place."""
+    look = _look(b, layer, mask)
     var = None
     if layer.use_variation:
         var = b.group(naming.SH_VARIATION, "variation", Amount=layer.variation, Scale=layer.variation_scale)
     if layer.color.enabled:
         val = _channel_source(b, layer, "color", layer.color, False)
+        if look is not None and layer.color.source in ("FLAT", "TINTED_GRUNGE"):
+            b.links.new(val, look.inputs["Color"])
+            val = b.outp(look, "Color")
+        if layer.ao_image is not None:  # PBR set AO darkens the layer's own colour
+            ao = _channel_image(b, "ao", _AoChannel(layer), True)
+            val = b.mix(1.0, val, ao.outputs["Color"], blend="MULTIPLY")
         content = b.nodes.get(naming.layer_node(layer.id, "content"))
         if layer.type == "PAINT" and content is not None:
             val = b.mix(1.0, val, content.outputs["Color"], blend="MULTIPLY")
@@ -381,6 +405,9 @@ def apply_content(b, layer, mask, cur, ctx):
         ch = getattr(layer, name)
         if ch.enabled:
             val = _channel_source(b, layer, name, ch, True)
+            if name == "roughness" and look is not None and ch.source == "FLAT":
+                b.links.new(val, look.inputs["Roughness"])
+                val = b.outp(look, "Roughness")
             if name == "roughness" and var is not None:
                 val = b.clamp(b.add(val, b.outp(var, "Roughness Offset")))
             mode = ch.blend if ch.blend in ("MIX", "MIN", "MAX") else "MIX"
@@ -391,13 +418,30 @@ def apply_content(b, layer, mask, cur, ctx):
         uvn = b.named("ShaderNodeUVMap", "normal.uv")
         img = _image_node(b, "normal.img", layer.normal_image, uvn.outputs[0], non_color=True)
         nm = b.named("ShaderNodeNormalMap", "normal.map", Strength=layer.normal_strength)
-        b.links.new(img.outputs["Color"], nm.inputs["Color"])
+        col = img.outputs["Color"]
+        if layer.normal_dx:  # CNT-5: DirectX normal map, flip green for Blender (OpenGL)
+            r, g, bl = b.sep(col)
+            col = b.comb(r, b.sub(1.0, g), bl)
+        b.links.new(col, nm.inputs["Color"])
         cur["Normal"] = b.mixv(mask, cur["Normal"], nm.outputs["Normal"])
     if layer.height.enabled:
         val = _channel_source(b, layer, "height", layer.height, True)
         mode = layer.height.blend if layer.height.blend in ("ADD", "SUBTRACT", "MAX", "REPLACE") else "ADD"
         cur["Height"] = _blend_height(b, mode, mask, cur["Height"], val)
         ctx["height_used"] = True
+    if look is not None and layer.look.micro > 0.0:  # micro relief joins the ONE shared bump
+        if cur["Height"] is None:
+            cur["Height"] = b.value_node("h0", 0.0)
+        cur["Height"] = b.add(cur["Height"], b.mul(mask, b.outp(look, "Height")))
+        ctx["height_used"] = True
+
+
+class _AoChannel:
+    """Adapter: the PBR set AO image sampled like the layer's other PBR maps (same projection)."""
+
+    def __init__(self, layer):
+        self.image, self.scale = layer.ao_image, layer.color.scale
+        self.use_uv = layer.color.use_uv
 
 
 # ---------------------------------------------------------------- compile
@@ -433,6 +477,7 @@ def compile(mat):
         b.begin(layer.id)
         b.layer_color = None
         b.pre_detail = None
+        b.detail_d = None
         decal_alpha = None
         if layer.type == "DECAL":
             from . import decals
@@ -596,6 +641,15 @@ def set_value(mat, path):
         targets += damage.value_targets(layer, prop)
     elif sub == "decal":
         targets.append(("decal", prop.title(), getattr(layer.decal, prop)))
+    elif sub == "look":
+        lk = layer.look
+        sock = {"color_var": "Color Variation", "rough_var": "Roughness Variation", "micro": "Micro",
+                "scale": "Scale"}.get(prop)
+        if sock is None:
+            return False
+        if prop == "micro" and (lk.micro > 0.0) != _micro_linked(g, lid):
+            return False  # micro crossing 0 adds or removes the relief from the shared bump
+        targets.append(("look", sock, getattr(lk, prop)))
     elif sub == "detail":
         det = layer.detail
         edge = g.nodes.get(naming.layer_node(lid, "edge"))
@@ -641,6 +695,11 @@ def set_value(mat, path):
         except (KeyError, TypeError):
             return False
     return True
+
+
+def _micro_linked(g, lid):
+    n = g.nodes.get(naming.layer_node(lid, "look"))
+    return n is not None and n.outputs["Height"].is_linked
 
 
 def on_material_value(mat, prop):

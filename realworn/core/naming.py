@@ -40,8 +40,11 @@ SH_EDGE_ERODE = "RW_P_EdgeErode"     # v2.1 Edge Detail modes (EDG-1..EDG-8)
 SH_EDGE_BURN = "RW_P_EdgeBurn"
 SH_EDGE_HEIGHT = "RW_P_EdgeHeight"
 SH_ANTI_TILE = "RW_P_AntiTile"       # v2.1 SRC-6: per-cell random rotation / offset
+CONTENT_PREFIX = "RW_Content_"       # v2.1 CNT-1: RW_Content_<Type> content looks
+CONTENT_TYPES = ("DIRT", "DUST", "RUST", "WEAR", "SCRATCHES", "WATER", "DAMAGE")
 ALL_GROUPS = (GN_MASKS, GN_DAMAGE, SH_PAINT_OVER, SH_EDGE_LOCK, SH_HEIGHT_BLEND, SH_LEVELS, SH_UP, SH_CONTRAST,
-              SH_VARIATION, SH_WATER, SH_DAMAGE, SH_DECAL_PROJECT, SH_EDGE_ERODE, SH_EDGE_BURN, SH_EDGE_HEIGHT, SH_ANTI_TILE)
+              SH_VARIATION, SH_WATER, SH_DAMAGE, SH_DECAL_PROJECT, SH_EDGE_ERODE, SH_EDGE_BURN, SH_EDGE_HEIGHT, SH_ANTI_TILE) \
+    + tuple(CONTENT_PREFIX + k.title() for k in CONTENT_TYPES)
 
 # Per-material stack group (CMP-1): only core/compiler.py edits its contents.
 STACK_PREFIX = "RW_Stack::"
@@ -95,6 +98,11 @@ STACK_OUTPUTS = (
 CHANNELS = ("Base Color", "Roughness", "Metallic", "Normal", "Coat Weight", "Coat Roughness", "Coat IOR",
             "Coat Normal")
 NORMAL_CHANNELS = ("Normal", "Coat Normal")
+
+
+def content_group(kind):
+    """RW_Content_<Type> (CNT-1), e.g. RW_Content_Dirt."""
+    return CONTENT_PREFIX + kind.title()
 
 
 def node_name(role):

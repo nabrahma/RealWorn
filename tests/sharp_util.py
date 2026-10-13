@@ -164,6 +164,22 @@ def render_mask_view(sc, mat, layer_index, path):
     return np.flipud(img[..., 0])
 
 
+def render_mask_view_rgb(sc, mat, layer_index, path):
+    """Like render_mask_view, but RGB (for Mask View's colour channel)."""
+    st = mat.realworn
+    st.active_layer_index = layer_index
+    st.mask_view = True
+    injector.set_mask_view(mat, True)
+    try:
+        sc.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        img = ru.load(path)
+    finally:
+        st.mask_view = False
+        injector.set_mask_view(mat, False)
+    return np.flipud(img)
+
+
 def crop(img, frac=0.8):
     h, w = img.shape
     dy, dx = int(h * (1 - frac) / 2), int(w * (1 - frac) / 2)

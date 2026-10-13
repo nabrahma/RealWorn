@@ -110,7 +110,9 @@ def test_t4_base_height_sampled_once(plate):
                 and n.image.name == img_name)
     assert count == 1
     bh = [n for n in g.nodes if n.name == naming.layer_node("stack", "bh")]
-    assert len(bh) == 1 and len(bh[0].outputs["Result"].links) == 4
+    # one shared normaliser; its users are the 4 Edge Detail stages (and the content looks that
+    # read the base height too, CNT-3)
+    assert len(bh) == 1 and len(bh[0].outputs["Result"].links) >= 4
 
 
 def test_t5_lean_and_deterministic(plate):

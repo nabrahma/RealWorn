@@ -151,14 +151,49 @@ def _channel(layout, layer, key, label):
         box.prop(ch, "variation", slider=True)
 
 
+def draw_look(layout, layer):
+    """CNT-2: the textured content look's controls."""
+    if layer.type not in LT.LOOK:
+        return
+    lk = layer.look
+    box = layout.box()
+    row = box.row(align=True)
+    row.prop(lk, "enabled", toggle=True, icon="TEXTURE")
+    if lk.enabled:
+        row.prop(lk, "scale", text="")
+        r = box.row(align=True)
+        r.prop(lk, "color_var", slider=True, text="Color Var.")
+        r.prop(lk, "rough_var", slider=True, text="Rough. Var.")
+        box.prop(lk, "micro", slider=True)
+
+
+def draw_library(layout, context, mat, layer):
+    """CNT-6: thumbnails of the content library's sets for this layer type."""
+    from ..props import prefs
+    p = prefs()
+    if p is None or not p.content_folder:
+        return
+    box = layout.box()
+    box.template_icon_view(context.scene.realworn, "content_set", show_labels=True, scale=4.0)
+    op = opx(box, "realworn.content_load", icon="IMPORT")
+    op.material = mat.name
+
+
 def draw_content(layout, mat, layer):
     opx(layout, "realworn.pbrset_load", icon="FILEBROWSER")
+    draw_library(layout, bpy.context, mat, layer)
+    draw_look(layout, layer)
     for key, label in CHANNELS:
         _channel(layout, layer, key, label)
     if layer.normal_image is not None:
         r = layout.row(align=True)
         r.label(text=layer.normal_image.name, icon="NORMALS_FACE")
+        r.prop(layer, "normal_dx", text="DX", toggle=True)
         r.prop(layer, "normal_strength", text="")
+    if layer.ao_image is not None:
+        r = layout.row(align=True)
+        r.label(text=layer.ao_image.name, icon="SHADING_RENDERED")
+        r.prop(layer, "ao_image", text="")
     row = layout.row(align=True)
     row.prop(layer, "use_variation", toggle=True)
     if layer.use_variation:

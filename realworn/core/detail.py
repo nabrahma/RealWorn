@@ -269,6 +269,13 @@ def apply_defaults(layer, kind):
             det.image2, det.mix2 = None, 0.0
     if kind == "DIRT" and d["mode"] == "HEIGHT":
         layer.use_height_blend = False  # Height Compare replaces v2.0's Height Blend
+    look = LT.look_defaults(kind)  # CNT-1: textured content look for effect types
+    if look is not None:
+        lk = layer.look
+        lk.enabled = True
+        lk.color_var, lk.rough_var, lk.micro, lk.scale = look["color_var"], look["rough_var"], look["micro"], look["scale"]
+    if kind == "RUST" and layer.color.source == "TINTED_GRUNGE":
+        layer.color.source = "FLAT"  # the look does the variation (and the orange rim)
 
 
 def apply_v21_defaults(mat):

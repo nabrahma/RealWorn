@@ -116,6 +116,17 @@ def _decal_items(self, context):
     return decals.library_enum_items()
 
 
+def _content_items(self, context):
+    from .core import pbrset
+    p = prefs()
+    kind = "ALL"
+    ob = context.active_object if context else None
+    mat = ob.active_material if ob is not None and ob.type == "MESH" else None
+    if mat is not None and mat.realworn.layers and 0 <= mat.realworn.active_layer_index < len(mat.realworn.layers):
+        kind = mat.realworn.layers[mat.realworn.active_layer_index].type
+    return pbrset.library_enum_items(p.content_folder if p is not None else "", kind)
+
+
 def _grunge_items(self, context):
     from .core import grunge
     return grunge.library_enum_items()
@@ -138,6 +149,8 @@ class RWChannel(bpy.types.PropertyGroup):
                              description="Tinted Grunge: how much the grunge varies the colour")
     grunge: PointerProperty(name="Grunge", type=bpy.types.Image, update=_struct,
                             description="Tinted Grunge: the black and white image that varies the colour")
+    invert: BoolProperty(name="Invert", default=False, update=_struct,
+                         description="Use 1 - image (a glossiness map as roughness); set when loading a PBR set")
 
 
 class RWIngredient(bpy.types.PropertyGroup):
@@ -229,6 +242,19 @@ class RWDetail(bpy.types.PropertyGroup):
                             description="Random rotation and offset per cell so a small grunge does not visibly repeat")
 
 
+class RWLook(bpy.types.PropertyGroup):
+    """Content look (PRD v2.1 CNT-1..CNT-4): textured colour, roughness and micro relief for the
+    layer type, on top of the layer's Color and Roughness values."""
+    enabled: BoolProperty(name="Textured Look", default=False, update=_struct,
+                          description="Vary colour, roughness and micro relief like the real material")
+    color_var: FloatProperty(name="Color Variation", default=0.4, min=0.0, max=1.0, update=_v("color_var"))
+    rough_var: FloatProperty(name="Roughness Variation", default=0.4, min=0.0, max=1.0, update=_v("rough_var"))
+    micro: FloatProperty(name="Micro Normal", default=0.5, min=0.0, max=4.0, update=_v("micro"),
+                         description="Micro relief strength (grit, pitting, brushing), through the shared bump")
+    scale: FloatProperty(name="Detail Scale", default=0.3, min=0.001, soft_max=10.0, subtype="DISTANCE",
+                         update=_v("scale"), description="Size of the look's variation in metres")
+
+
 class RWLayer(bpy.types.PropertyGroup):
     id: StringProperty(name="ID", default="", description="Stable id used in node names")
     name: StringProperty(name="Name", default="Layer")
@@ -268,6 +294,11 @@ class RWLayer(bpy.types.PropertyGroup):
     damage: PointerProperty(type=RWDamage)
     decal: PointerProperty(type=RWDecal)
     detail: PointerProperty(type=RWDetail)
+    look: PointerProperty(type=RWLook)
+    ao_image: PointerProperty(name="AO", type=bpy.types.Image, update=_struct,
+                              description="PBR Set ambient occlusion: darkens the layer's colour in crevices")
+    normal_dx: BoolProperty(name="DirectX Normal", default=False, update=_struct,
+                            description="The normal map is DirectX (green flipped); detected when loading a PBR set")
 
 
 class RW_MaterialProps(bpy.types.PropertyGroup):
@@ -322,6 +353,8 @@ class RW_SceneProps(bpy.types.PropertyGroup):
                                    description="Grunge contrast (brush texture, or the Fill ingredient)")
     grunge_invert: BoolProperty(name="Invert", default=False, update=_grunge_look)
     decal_image: EnumProperty(name="Decal", items=_decal_items, description="Decal image from the library")
+    content_set: EnumProperty(name="PBR Set", items=_content_items,
+                              description="PBR sets in the content library that suit this layer type")
     decal_mode: EnumProperty(name="Mode", items=DECAL_MODE_ITEMS, default="FULL")
     decal_size: FloatProperty(name="Size", min=0.01, max=20.0, default=0.6, subtype="DISTANCE")
     bake_resolution: EnumProperty(name="Resolution", items=RES_ITEMS, default="1024")
@@ -341,12 +374,15 @@ class RW_Preferences(bpy.types.AddonPreferences):
                                   description="Extra folder of black and white grunge images")
     decal_folder: StringProperty(name="Decal Library Folder", subtype="DIR_PATH", default="",
                                  description="Extra folder of decal images (name.png, optional name_nrm.png)")
+    content_folder: StringProperty(name="Content Library Folder", subtype="DIR_PATH", default="",
+                                   description="Folder of PBR sets (ambientCG or Poly Haven downloads work as they are; "
+                                               "optional category folders: Dirt, Rust, Metal, Concrete...)")
     developer_mode: BoolProperty(name="Developer Mode", default=False,
                                  description="Show Reload Add-on and Rebuild Assets in the Debug panel")
 
     def draw(self, context):
         col = self.layout.column()
-        for p in ("mask_storage", "texel_density", "grunge_folder", "decal_folder", "developer_mode"):
+        for p in ("mask_storage", "texel_density", "grunge_folder", "decal_folder", "content_folder", "developer_mode"):
             col.prop(self, p)
 
 
@@ -356,7 +392,7 @@ def prefs():
     return addon.preferences if addon else None
 
 
-_classes = (RWChannel, RWIngredient, RWWater, RWDamage, RWDecal, RWDetail, RWLayer, RW_MaterialProps, RW_ObjectProps,
+_classes = (RWChannel, RWIngredient, RWWater, RWDamage, RWDecal, RWDetail, RWLook, RWLayer, RW_MaterialProps, RW_ObjectProps,
             RW_SceneProps, RW_Preferences)
 
 
