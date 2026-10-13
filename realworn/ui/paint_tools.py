@@ -1,8 +1,8 @@
-"""While painting (PRD v2 "While painting"): a small viewport overlay and a pie menu.
+"""While painting (PRD v3 UI-6): a small viewport overlay and a pie menu.
 
-Overlay: layer name, Paint / Erase / Reset, brush mode and a grunge thumbnail, drawn only while an
-object is in RealWorn paint mode. Pie menu: Paint, Erase, Reset, Next Layer, Previous Layer, Mask
-View, Exit. Its keymap item lives in the add-on keyconfig and is unassigned by default (key NONE)
+Overlay (UI-6): one line with the layer name, the brush and its shortcuts, drawn only while an
+object is in RealWorn paint mode. Pie menu: Paint, Erase, Next Layer, Previous Layer, Mask View,
+Exit. Its keymap item lives in the add-on keyconfig and is unassigned by default (key NONE)
 so it never clashes; assign a key in Preferences > Keymap (search "RealWorn Paint"). Keymaps are
 scoped to the add-on keyconfig, as Paint System does (docs/reference_notes.md).
 """
@@ -31,6 +31,18 @@ def _painting_state(context):
     return st, mat, layer
 
 
+SHORTCUTS = {
+    "RW Soft": "F size, Shift F strength, Ctrl erase",
+    "RW Damage": "F size, Shift F strength, Ctrl erase; the alpha follows the stroke (Rake)",
+    "RW Stencil": "Right-drag move, Ctrl right-drag rotate, Shift right-drag scale; Ctrl erases alpha",
+}
+
+
+def overlay_text(layer, brush_name):
+    """UI-6: one line: layer name, brush, and the shortcuts for it (Blender's own, PNT-4)."""
+    return "RealWorn  {}  |  {}  |  {}".format(layer.name, brush_name, SHORTCUTS.get(brush_name, "F size"))
+
+
 def _draw_overlay():
     context = bpy.context
     st, mat, layer = _painting_state(context)
@@ -38,37 +50,18 @@ def _draw_overlay():
         return
     import blf
     brush = context.tool_settings.image_paint.brush if context.tool_settings.image_paint else None
-    mode = st.get("paint_mode", "PAINT").title()
-    tex = brush.mask_texture if brush is not None and brush.name.startswith("RW ") else None
-    mapping = brush.mask_texture_slot.mask_map_mode.title().replace("_", " ") if tex is not None else "Soft"
-    lines = ["RealWorn  {}".format(layer.name), "{}  |  {}".format(mode, mapping)]
+    text = overlay_text(layer, brush.name if brush is not None else "")
+    if st.get("paint_mode") == "ERASE":
+        text += "  |  ERASING"
     font = 0
     scale = context.preferences.system.ui_scale
     blf.size(font, 13 * scale)
-    # top left, under the view name and object lines: Blender 5's brush asset shelf covers the
-    # bottom of the viewport in paint mode
-    # the toolbar overlaps the viewport (region overlap): start right of it, in line with the view name
+    # top left, in line with the view name: Blender 5's brush asset shelf covers the bottom
     tools = next((r.width for r in context.area.regions if r.type == "TOOLS"), 0) if context.area else 0
     x, y = int(tools + 20 * scale), int(context.region.height - 110 * scale)
-    for i, text in enumerate(lines):
-        blf.color(font, 1.0, 1.0, 1.0, 0.9 if i == 0 else 0.7)
-        blf.position(font, x + (56 * scale if tex is not None else 0), y - i * 18 * scale, 0)
-        blf.draw(font, text)
-    if tex is not None and tex.image is not None:
-        try:
-            import gpu
-            from gpu_extras.batch import batch_for_shader
-            texture = gpu.texture.from_image(tex.image)
-            shader = gpu.shader.from_builtin("IMAGE")
-            s = 46 * scale
-            batch = batch_for_shader(shader, "TRI_FAN", {"pos": ((x, y - 26 * scale), (x + s, y - 26 * scale),
-                                                                 (x + s, y + 20 * scale), (x, y + 20 * scale)),
-                                                         "texCoord": ((0, 0), (1, 0), (1, 1), (0, 1))})
-            shader.bind()
-            shader.uniform_sampler("image", texture)
-            batch.draw(shader)
-        except Exception:
-            pass  # the thumbnail is a nicety; never break drawing
+    blf.color(font, 1.0, 1.0, 1.0, 0.9)
+    blf.position(font, x, y, 0)
+    blf.draw(font, text)
 
 
 class RW_OT_layer_step(bpy.types.Operator):
@@ -118,7 +111,6 @@ class RW_MT_paint_pie(bpy.types.Menu):
         pie.operator("realworn.paint_mode", text="Paint", icon="ADD").mode = "PAINT"
         pie.operator("realworn.layer_step", text="Previous Layer", icon="TRIA_DOWN").direction = "DOWN"
         pie.operator("realworn.layer_step", text="Next Layer", icon="TRIA_UP").direction = "UP"
-        pie.operator("realworn.paint_mode", text="Reset", icon="LOOP_BACK").mode = "RESET"
         pie.operator("realworn.mask_view_toggle", icon="MOD_MASK")
         pie.operator("realworn.paint_exit", icon="CHECKMARK")
 
@@ -134,7 +126,7 @@ def register():
         _draw_handle = bpy.types.SpaceView3D.draw_handler_add(_draw_overlay, (), "WINDOW", "POST_PIXEL")
     kc = bpy.context.window_manager.keyconfigs.addon if bpy.context.window_manager else None
     if kc is not None:
-        for km_name in ("Image Paint", "Vertex Paint"):
+        for km_name in ("Image Paint",):
             km = kc.keymaps.new(name=km_name, space_type="EMPTY")
             kmi = km.keymap_items.new("wm.call_menu_pie", type="NONE", value="PRESS")
             kmi.properties.name = RW_MT_paint_pie.bl_idname

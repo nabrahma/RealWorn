@@ -1,14 +1,13 @@
-"""Paint mode (PNT-4..PNT-11): RealWorn drives Blender's own texture paint, it has no brush engine.
+"""Paint mode (PNT-1, PNT-2, PNT-4): RealWorn drives Blender's own texture paint; it has no brush
+engine.
 
 enter()  remembers the object's mode, active UV map, Image Paint mode / canvas, active brush and
          unified colours, then: RW_Paint becomes the active UV (never the render UV), Texture
-         Paint mode in Single Image mode with the layer's mask (or content) image as canvas, the
-         RealWorn brush, white primary and black secondary colour (Ctrl strokes erase).
-set_mode PAINT (white, Mix), ERASE (black at full alpha: removes paint and the procedural
-         fill under it), RESET (Erase Alpha: back to whatever the ingredients produce).
+         Paint mode in Single Image mode with the layer's image as canvas, the kind's brush
+         (RW Soft, RW Damage with the damage alpha, RW Stencil with the decal), white primary and
+         black secondary colour, so holding Ctrl paints black (erases a mask).
+set_mode PAINT, or ERASE: masks paint black; a Decals image erases alpha (DEC-5, Erase Alpha).
 exit()   restores everything enter() changed and stores the image (packed or PNG).
-Vertex-colour fallback (PNT-11): the mask is the corner colour attribute rw_vmask_<layer id>,
-painted in Vertex Paint mode.
 """
 
 import json
@@ -43,28 +42,11 @@ def _activate_ref(ref):
         return False
 
 
-def _vertex_attr(obj, layer):
-    me = obj.data
-    name = naming.ATTR_VMASK + layer.id
-    attr = me.color_attributes.get(name)
-    if attr is None:
-        active = me.color_attributes.active_color_name
-        attr = me.color_attributes.new(name, "BYTE_COLOR", "CORNER")
-        attr.data.foreach_set("color", [0.0, 0.0, 0.0, 0.0] * len(attr.data))
-        if active:
-            me.color_attributes.active_color_name = active
-    return attr
-
-
-def target_image(obj, mat, layer, target="MASK"):
-    if target == "CONTENT":
-        return images.ensure_content(obj, mat, layer)
-    return images.ensure_mask(obj, mat, layer)
-
-
-def enter(obj, mat, layer, target="MASK", mask_view=False):
-    """PNT-4: switch to painting the layer's mask (or content image). Returns the canvas image
-    (None for vertex-colour masks)."""
+def enter(obj, mat, layer, mask_view=False):
+    """PNT-1: switch to painting the layer's image. Returns the canvas image."""
+    from . import kinds
+    if not (kinds.paintable(layer.kind)):
+        raise ValueError("{} layers are not painted".format(kinds.label(layer.kind)))
     ts = bpy.context.scene.tool_settings
     ip = ts.image_paint
     ups = ip.unified_paint_settings
@@ -78,61 +60,56 @@ def enter(obj, mat, layer, target="MASK", mask_view=False):
             "brush": _asset_ref(ip),
             "unified_color": ups.use_unified_color,
             "color": list(ups.color), "secondary": list(ups.secondary_color),
-            "vp_brush": _asset_ref(ts.vertex_paint) if ts.vertex_paint else None,
-            "color_attr": me.color_attributes.active_color_name,
             "material": mat.name, "mask_view": mat.realworn.mask_view,
         }
         obj[STATE] = json.dumps(state)
     state = json.loads(obj[STATE])
     state["layer"] = layer.id
-    state["target"] = target
     obj[STATE] = json.dumps(state)
     idx = next(i for i, ly in enumerate(mat.realworn.layers) if ly.id == layer.id)
     if mat.realworn.active_layer_index != idx:
         with compiler.batch(mat):
             mat.realworn.active_layer_index = idx
-    if layer.use_vertex_mask:
-        attr = _vertex_attr(obj, layer)
-        me.color_attributes.active_color_name = attr.name
-        if obj.mode != "VERTEX_PAINT":
-            with bpy.context.temp_override(**ctx.override(obj)):
-                bpy.ops.object.mode_set(mode="VERTEX_PAINT")
-        grunge.activate_brush(grunge.ensure_brush("RW Soft", mode="VERTEX_PAINT"), remember=False)
-        set_mode(obj, "PAINT")
-        compiler.compile(mat)
-        return None
-    img = target_image(obj, mat, layer, target)
+    img = images.ensure_mask(obj, mat, layer)
     me.uv_layers.active = me.uv_layers[naming.UV_PAINT]
     if obj.mode != "TEXTURE_PAINT":
         with bpy.context.temp_override(**ctx.override(obj)):
             bpy.ops.object.mode_set(mode="TEXTURE_PAINT")
     ip.mode = "IMAGE"
     ip.canvas = img
-    grunge.activate_brush(grunge.ensure_brush(grunge.chosen_brush(kind=layer.type)), remember=False)
+    _, _, _, region = ctx.window_area()
+    brush = grunge.prepare_brush(layer.kind, region=region)
+    grunge.activate_brush(brush)
     set_mode(obj, "PAINT")
-    if mask_view and target == "MASK" and not mat.realworn.mask_view:
+    if mask_view and layer.kind != "DECALS" and not mat.realworn.mask_view:
         mat.realworn.mask_view = True
     return img
 
 
-def _brush(ts, obj):
-    if obj is not None and obj.mode == "VERTEX_PAINT":
-        return ts.vertex_paint.brush if ts.vertex_paint else None
-    return ts.image_paint.brush
+def _layer_of(obj):
+    if not painting(obj):
+        return None, None
+    st = json.loads(obj[STATE])
+    mat = bpy.data.materials.get(st.get("material", ""))
+    if mat is None:
+        return None, None
+    return mat, compiler.layer_by_id(mat, st.get("layer", ""))
 
 
 def set_mode(obj, mode):
-    """PNT-5 / PNT-6: Paint (white), Erase (black, full alpha), Reset (Erase Alpha)."""
+    """PAINT (white), or ERASE: black on masks, Erase Alpha on a Decals image (DEC-5)."""
     ts = bpy.context.scene.tool_settings
     ups = ts.image_paint.unified_paint_settings
     ups.use_unified_color = True
-    if mode == "ERASE":
+    _, layer = _layer_of(obj)
+    decal = layer is not None and layer.kind == "DECALS"
+    if mode == "ERASE" and not decal:
         ups.color, ups.secondary_color = (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
     else:
         ups.color, ups.secondary_color = (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)
-    b = _brush(ts, obj)
-    if b is not None and b.name.startswith("RW "):  # RealWorn only ever edits its own brushes
-        b.blend = "ERASE_ALPHA" if mode == "RESET" else "MIX"
+    b = ts.image_paint.brush
+    if b is not None and b.get("rw_brush"):  # RealWorn only ever edits its own brushes
+        b.blend = "ERASE_ALPHA" if (mode == "ERASE" and decal) else "MIX"
         b.color = ups.color
         b.secondary_color = ups.secondary_color
     if obj is not None and STATE in obj:
@@ -144,17 +121,18 @@ def set_mode(obj, mode):
 
 def switch_layer(obj, mat):
     """Selecting another layer while painting switches the canvas immediately."""
+    from . import kinds
     if not painting(obj):
         return None
     st = json.loads(obj[STATE])
     layer = mat.realworn.layers[mat.realworn.active_layer_index]
-    if layer.id == st.get("layer"):
+    if layer.id == st.get("layer") or not kinds.paintable(layer.kind):
         return None
-    return enter(obj, mat, layer, st.get("target", "MASK"))
+    return enter(obj, mat, layer)
 
 
 def exit(obj):
-    """PNT-9: back to the previous mode, UV, canvas, brush and colours; store the image."""
+    """Back to the previous mode, UV, canvas, brush and colours; store the image."""
     if not painting(obj):
         return False
     st = json.loads(obj[STATE])
@@ -163,6 +141,9 @@ def exit(obj):
     ups = ip.unified_paint_settings
     canvas = ip.canvas
     me = obj.data
+    b = ip.brush
+    if b is not None and b.get("rw_brush"):
+        b.blend = "MIX"
     if obj.mode != st["mode"]:
         with bpy.context.temp_override(**ctx.override(obj)):
             bpy.ops.object.mode_set(mode=st["mode"] if st["mode"] in ("OBJECT", "EDIT", "SCULPT", "VERTEX_PAINT",
@@ -174,8 +155,6 @@ def exit(obj):
     _activate_ref(st.get("brush"))
     ups.use_unified_color = st["unified_color"]
     ups.color, ups.secondary_color = st["color"], st["secondary"]
-    if st.get("color_attr") and st["color_attr"] in me.color_attributes:
-        me.color_attributes.active_color_name = st["color_attr"]
     mat = bpy.data.materials.get(st.get("material", ""))
     if mat is not None and mat.realworn.mask_view != st.get("mask_view", False):
         mat.realworn.mask_view = st.get("mask_view", False)

@@ -1,4 +1,4 @@
-"""Baking through RW_Paint (BAK-1..BAK-4) and the helpers decal baking uses (DEC-5).
+"""Baking through RW_Paint: Bake Material, Export Textures, and Bake Edges and AO (ENG-2).
 
 Pattern from Ucupaint (bake_common.remember_before_bake / recover_bake_settings, see
 docs/reference_notes.md; no code copied): remember everything a bake touches (engine, samples,
@@ -14,9 +14,6 @@ import bpy
 import numpy as np
 
 from . import compiler, ctx, images, injector, naming, nodeutil
-
-BAKE_CHANNELS = (("base_color", "Base Color", "sRGB"), ("roughness", "Roughness", "Non-Color"),
-                 ("metallic", "Metallic", "Non-Color"), ("height", "Height", "Non-Color"))
 
 
 class BakeError(Exception):
@@ -126,10 +123,9 @@ def route_emission(mat, source):
 
 def restore_emission(mat):
     nt = mat.node_tree
-    for role in ("bake_emit",):
-        n = nodeutil.find(nt, role)
-        if n is not None:
-            nt.nodes.remove(n)
+    n = nodeutil.find(nt, "bake_emit")
+    if n is not None:
+        nt.nodes.remove(n)
     if "rw_bake_surface" in mat:
         src = nodeutil.resolve(nt, json.loads(mat["rw_bake_surface"]))
         out = nodeutil.output_node(nt)
@@ -144,23 +140,13 @@ def stack_output(name):
     return get
 
 
-def bake_layer_view(scene, obj, mat, layer_index, channel, img):
-    """Bake one layer's Mask View ('MASK') or its own colour ('COLOR') into `img`."""
-    st = mat.realworn
-    prev = (st.active_layer_index, st.mask_view, st.view_channel)
-    with compiler.batch(mat):
-        st.active_layer_index = layer_index
-        st.mask_view = True
-        st.view_channel = channel
-    compiler.compile(mat)
+def bake_socket(scene, obj, mat, source, img, samples=4):
+    """Bake any socket (via `source(tree)`) of the material as emission into `img`."""
+    route_emission(mat, source)
     try:
-        route_emission(mat, stack_output("Layer Color" if channel == "COLOR" else "Mask View"))
-        run(scene, obj, [mat], img, "EMIT")
+        run(scene, obj, [mat], img, "EMIT", samples=samples)
     finally:
         restore_emission(mat)
-        with compiler.batch(mat):
-            st.active_layer_index, st.mask_view, st.view_channel = prev
-        compiler.compile(mat)
     return img
 
 
@@ -173,44 +159,9 @@ def linear_to_srgb(x):
     return np.where(x <= 0.0031308, x * 12.92, 1.055 * np.power(x, 1 / 2.4) - 0.055)
 
 
-def bleed(rgb, alpha, passes=12):
-    """Push opaque colours outward into transparent texels so texture filtering at the edge does
-    not blend towards black (the dark halo a straight copy gives)."""
-    rgb = rgb.copy()
-    w = (alpha > 0.5).astype(np.float32)
-    for _ in range(passes):
-        if w.min() > 0:
-            break
-        acc = np.zeros_like(rgb)
-        cnt = np.zeros(w.shape, np.float32)
-        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            acc += np.roll(np.roll(rgb * w[..., None], dy, 0), dx, 1)
-            cnt += np.roll(np.roll(w, dy, 0), dx, 1)
-        grow = (w == 0) & (cnt > 0)
-        rgb[grow] = acc[grow] / cnt[grow][..., None]
-        w = np.maximum(w, grow.astype(np.float32))
-    return rgb
-
-
-def compose_rgba(color_img, alpha_img, target):
-    """Baked emission colour (linear) + baked mask -> an RGBA image in the target's colour space."""
-    c = pixels(color_img)[..., :3]
-    a = pixels(alpha_img)[..., 0]
-    c = bleed(c, a)
-    if target.colorspace_settings.name.lower().startswith("srgb"):
-        c = linear_to_srgb(c)
-    out = np.empty(c.shape[:2] + (4,), np.float32)
-    out[..., :3] = c
-    out[..., 3] = a
-    target.pixels.foreach_set(out.ravel())
-    target.update()
-    return target
-
-
-# ================================================================ BAK-2
+# ================================================================ Bake Material
 MATERIAL_CHANNELS = (("base_color", "Base Color", "sRGB"), ("roughness", "Roughness", "Non-Color"),
-                     ("metallic", "Metallic", "Non-Color"), ("height", "Height", "Non-Color"),
-                     ("coat_weight", "Coat Weight", "Non-Color"), ("coat_roughness", "Coat Roughness", "Non-Color"))
+                     ("metallic", "Metallic", "Non-Color"), ("height", "Displacement", "Non-Color"))
 BAKED_KEY = "rw_baked_images"
 
 
@@ -223,51 +174,31 @@ def _float_to_target(src, target, srgb):
     target.update()
 
 
-def _damage_guard(obj, geometry_damage):
-    from . import damage
-    mod = damage.damage_modifier(obj)
-    if mod is None:
-        return None
-    if geometry_damage == "APPLY":
-        damage.apply_geometry(obj)
-        return None
-    if geometry_damage == "EXCLUDE":
-        state = (mod.show_render, mod.show_viewport)
-        mod.show_render = mod.show_viewport = False
-        return mod, state
-    raise BakeError("{}: has Geometry-mode damage; apply it or exclude it before baking (BAK-4)".format(obj.name))
-
-
-def bake_material(obj, mat, scene=None, resolution=1024, folder="//rw_bake/", swap=True, geometry_damage="ERROR",
-                  samples=16):
-    """BAK-2: bake the whole stack to PBR textures on RW_Paint and swap the stack for them.
-    Returns {key: image}; images are saved to `folder` (8-bit PNG, height as float EXR)."""
+def bake_material(obj, mat, scene=None, resolution=2048, folder="//rw_bake/", swap=True, samples=16):
+    """UI-5: bake the whole stack to PBR textures on RW_Paint and swap the stack for them.
+    Returns {key: image}; images are saved to `folder` (8-bit PNG, height as float EXR in metres)."""
     scene = scene or bpy.context.scene
     if not injector.is_setup(mat):
         raise BakeError("{}: not set up".format(mat.name))
-    guard = _damage_guard(obj, geometry_damage)
     out_dir = output_folder(folder)
     result = {}
-    try:
-        for key, socket, cs in MATERIAL_CHANNELS:
-            raw = new_image("rw_tmp_bake", resolution, "Non-Color", float_buffer=True)
-            route_emission(mat, stack_output(socket))
-            try:
-                run(scene, obj, [mat], raw, "EMIT", samples=4)
-            finally:
-                restore_emission(mat)
-            img = new_image("{}_{}".format(bpy.path.clean_name(mat.name), key), resolution, cs,
-                            float_buffer=(key == "height"))
+    for key, socket, cs in MATERIAL_CHANNELS:
+        if key == "height" and not compiler.has_height(mat):
+            continue
+        raw = new_image("rw_tmp_bake", resolution, "Non-Color", float_buffer=True)
+        bake_socket(scene, obj, mat, stack_output(socket), raw)
+        img = new_image("{}_{}".format(bpy.path.clean_name(mat.name), key), resolution, cs,
+                        float_buffer=(key == "height"))
+        if key == "height":
+            img.pixels.foreach_set(pixels(raw).ravel())
+            img.update()
+        else:
             _float_to_target(raw, img, cs == "sRGB")
-            bpy.data.images.remove(raw)
-            result[key] = img
-        nimg = new_image("{}_normal".format(bpy.path.clean_name(mat.name)), resolution, "Non-Color")
-        run(scene, obj, [mat], nimg, "NORMAL", samples=samples)
-        result["normal"] = nimg
-    finally:
-        if guard is not None:
-            mod, (r, v) = guard
-            mod.show_render, mod.show_viewport = r, v
+        bpy.data.images.remove(raw)
+        result[key] = img
+    nimg = new_image("{}_normal".format(bpy.path.clean_name(mat.name)), resolution, "Non-Color")
+    run(scene, obj, [mat], nimg, "NORMAL", samples=samples)
+    result["normal"] = nimg
     for key, img in result.items():
         img[BAKED_KEY] = True
         img.filepath_raw = os.path.join(out_dir, img.name + (".exr" if img.is_float else ".png"))
@@ -297,7 +228,8 @@ def remove_baked_nodes(mat):
 
 def swap_to_baked(mat, images_by_key):
     """Feed the Principled BSDF(s) from the baked images (sampled through RW_Paint) instead of the
-    live stack; the stack stays in the tree for Restore Live Stack."""
+    live stack; the stack stays in the tree for Restore Live Stack. The baked normal map carries
+    the relief, so the live displacement is unplugged."""
     nt = mat.node_tree
     remove_baked_nodes(mat)
     frame = nodeutil.ensure_frame(nt)
@@ -325,8 +257,7 @@ def swap_to_baked(mat, images_by_key):
         for i, n in enumerate([uvn] + list(nodes.values()) + [nmap]):
             injector._place(n, x + 30, y + 200 + i * 40)
         nt.links.new(nodes["base_color"].outputs["Color"], p.inputs["Base Color"])
-        for key, sock in (("roughness", "Roughness"), ("metallic", "Metallic"), ("coat_weight", "Coat Weight"),
-                          ("coat_roughness", "Coat Roughness")):
+        for key, sock in (("roughness", "Roughness"), ("metallic", "Metallic")):
             const = constant_value(images_by_key[key])
             if const is not None:  # a flat map costs a texture lookup per sample for nothing
                 for link in list(p.inputs[sock].links):
@@ -335,16 +266,7 @@ def swap_to_baked(mat, images_by_key):
             else:
                 nt.links.new(nodes[key].outputs["Color"], p.inputs[sock])
         nt.links.new(nmap.outputs["Normal"], p.inputs["Normal"])
-        nt.links.new(nmap.outputs["Normal"], p.inputs["Coat Normal"])
-        # Coat IOR is not baked: feed it what fed the stack (water's 1.33 blend is dropped). Leaving
-        # the stack linked here would keep Cycles evaluating every live mask after Bake.
-        src = st.inputs["Coat IOR"]
-        for link in list(p.inputs["Coat IOR"].links):
-            nt.links.remove(link)
-        if src.is_linked:
-            nt.links.new(src.links[0].from_socket, p.inputs["Coat IOR"])
-        else:
-            p.inputs["Coat IOR"].default_value = src.default_value
+    injector.unlink_displacement(mat)
     mat[BAKED_KEY] = json.dumps({k: img.name for k, img in images_by_key.items()})
     mat.realworn.baked = True
     return True
@@ -363,88 +285,16 @@ def restore_live(mat):
     mat.realworn.baked = False
     if BAKED_KEY in mat:
         del mat[BAKED_KEY]
+    injector.sync_outputs(mat)
     return True
 
 
-# ================================================================ BAK-1
-def flatten(obj, mat, first, last, scene=None, resolution=None):
-    """Merge layers first..last (inclusive) into one Paint layer: colour, roughness, metallic and
-    height are baked from the stack up to `last`; its mask is the run's coverage (max of their
-    masks). Exact where the run fully covers; an approximation where it is partly transparent
-    over a different look below."""
-    from . import layers as L
-    scene = scene or bpy.context.scene
-    st = mat.realworn
-    first, last = sorted((first, last))
-    res = resolution or images.texel_resolution(obj)
-    saved_vis = [ly.visible for ly in st.layers]
-    saved_view = (st.mask_view, st.view_channel, st.active_layer_index)
-    raw = {}
-    try:
-        with compiler.batch(mat):  # the look up to `last`: hide everything above it
-            for i, ly in enumerate(st.layers):
-                ly.visible = saved_vis[i] and i <= last
-            st.mask_view = False
-        compiler.compile(mat)
-        for key, socket, cs in BAKE_CHANNELS:
-            img = new_image("rw_tmp_flat_" + key, res, "Non-Color", float_buffer=True)
-            route_emission(mat, stack_output(socket))
-            try:
-                run(scene, obj, [mat], img, "EMIT")
-            finally:
-                restore_emission(mat)
-            raw[key] = img
-        with compiler.batch(mat):  # coverage of the run only
-            for i, ly in enumerate(st.layers):
-                ly.visible = saved_vis[i] and first <= i <= last
-        compiler.compile(mat)
-        cov = new_image("rw_tmp_flat_cov", res, "Non-Color", float_buffer=True)
-        route_emission(mat, stack_output("Coverage"))
-        try:
-            run(scene, obj, [mat], cov, "EMIT")
-        finally:
-            restore_emission(mat)
-        raw["coverage"] = cov
-    finally:
-        with compiler.batch(mat):
-            for i, ly in enumerate(st.layers):
-                ly.visible = saved_vis[i]
-            st.mask_view, st.view_channel, st.active_layer_index = saved_view
-        compiler.compile(mat)
-    names = [st.layers[i].name for i in range(first, last + 1)]
-    merged = L.add_layer(mat, "PAINT", name="Flattened ({})".format(", ".join(names))[:60], index=last + 1)
-    with compiler.batch(mat):
-        content = images.create_mask(obj, merged, res=res, kind="content")
-        compose_rgba(raw["base_color"], raw["coverage"], content)
-        images.store(content, obj)
-        merged.content_image = content
-        for key in ("roughness", "metallic", "height"):
-            img = new_image("RW_{}_{}_{}".format(obj.name, merged.id, key), res, "Non-Color", float_buffer=True)
-            img.pixels.foreach_set(pixels(raw[key]).ravel())
-            img[naming.IMG_CONTENT] = "{}/{}".format(obj.name, merged.id)
-            img["rw_baked"] = True
-            images.store(img, obj)
-            ch = getattr(merged, key)
-            ch.enabled, ch.source, ch.image = True, "IMAGE", img
-            ch.blend = "REPLACE" if key == "height" else "MIX"
-            if key == "height":
-                ch.value = 1.0
-        merged.color.color = (1.0, 1.0, 1.0)
-    merged_id = merged.id
-    compiler.compile(mat)
-    for i in range(last, first - 1, -1):
-        L.remove_layer(mat, i, delete_images=True)
-    for img in raw.values():
-        bpy.data.images.remove(img)
-    return compiler.layer_by_id(mat, merged_id)  # collection items move when others are removed
-
-
-# ================================================================ BAK-3
+# ================================================================ Export
 NORMAL_CONVENTION = {"UNITY_URP": "OpenGL", "UNITY_HDRP": "OpenGL", "UNREAL": "DirectX", "GLTF": "OpenGL"}
 
 
 def export_textures(mat, folder, preset="UNREAL", name=None):
-    """Write the baked set with engine conventions (needs bake_material first). Returns paths."""
+    """UI-5: write the baked set with engine conventions (needs Bake Material first). Returns paths."""
     if BAKED_KEY not in mat:
         raise BakeError("{}: bake the material first".format(mat.name))
     if preset not in NORMAL_CONVENTION:

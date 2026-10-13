@@ -1,16 +1,18 @@
-"""The layer compiler (CMP-1..CMP-5): material.realworn.layers -> RW_Stack::<material>.
+"""The layer compiler: material.realworn.layers -> RW_Stack::<material> (PRD v3 "Architecture").
 
 Rules
-- compile(mat) rebuilds the group's contents from scratch, bottom layer first. Same data,
-  same tree: nodes are named RW::<layer_id>::<role> and placed by code (CMP-3).
-- Lean (CMP-2): a layer only gets the nodes it uses. A hidden layer or a layer with nothing
-  painted and no ingredient has no nodes at all; an empty stack is a pass-through.
-- Value changes (on_value) write into the named node input; only structural changes (on_struct)
-  recompile, so EEVEE does not rebuild shaders while a slider is dragged (CMP-4).
+- compile(mat) rebuilds the group's contents from scratch, Base first, then the layers bottom to
+  top. Same data, same tree: nodes are named RW::<layer_id>::<role> and placed by code.
+- The tree is the tutorial's, labelled: box-mapped Image Textures (Object coordinates, Mapping,
+  Box projection Blend 0.3), Hue/Saturation for Tint Below, and per layer the mask recipe as real
+  Color Ramp and Mix (Subtract) nodes (MSK-1), framed and named after the layer.
+- Channel mixing into one Principled BSDF: every layer blends Base Color, Roughness and Metallic by
+  its mask, and the one shared height (metres) goes to the material's Displacement as bump.
+- Lean: a hidden layer, or one with nothing to show (nothing painted, no decal image), has no
+  nodes; Breakup at Amount 0, Edge Darkening at 0 and a missing height add no nodes.
+- Value changes (on_value) write into the named node; only structural changes recompile, so
+  EEVEE does not rebuild shaders while a slider is dragged.
 - Only this module creates or deletes nodes inside RW_Stack::<material>.
-
-Units: height channels and the Displacement output are millimetres; the final Bump uses
-Distance 0.001 so 1 unit of height is 1 mm.
 """
 
 import contextlib
@@ -18,12 +20,14 @@ import re
 
 import bpy
 
-from . import assets, naming
+from . import kinds as K
+from . import naming
 from ..builders._dsl import SOCKET_TYPES, Tree
 
 _suspended = set()
-_PATH = re.compile(r"realworn\.layers\[(\d+)\](?:\.(\w+)(?:\[(\d+)\])?)?\.(\w+)$")
 COMPILES = {"count": 0}  # tests read this to prove value edits do not recompile
+BOX_BLEND = 0.3          # SET-3: the tutorial's Box projection blend
+_LAYER_PATH = re.compile(r"^realworn\.layers\[(\d+)\](?:\.(texture))?$")
 
 
 # ---------------------------------------------------------------- batching
@@ -55,7 +59,7 @@ def ensure_group(mat):
         g[naming.OWNED_PROP] = True
         st.stack = g
     have = {(i.name, i.in_out) for i in g.interface.items_tree if i.item_type == "SOCKET"}
-    for name, stype, default in naming.STACK_INPUTS:  # also upgrades stacks from older versions
+    for name, stype, default in naming.STACK_INPUTS:
         if (name, "INPUT") not in have:
             s = g.interface.new_socket(name, in_out="INPUT", socket_type=SOCKET_TYPES[stype])
             if default is None:
@@ -88,33 +92,42 @@ def objects_using(mat):
 
 # ---------------------------------------------------------------- builder
 class _B(Tree):
-    """Tree DSL plus deterministic naming for one layer block."""
+    """Tree DSL plus deterministic naming and a labelled frame per layer block."""
 
     def __init__(self, tree, gi, go):
         super().__init__(tree)
         self.gi, self.go = gi, go
         self.lid = "stack"
         self.n = 0
+        self._mark = 0
 
     def begin(self, lid):
         self.lid = lid
         self.n = 0
         self._mark = len(self.nodes)
 
-    def end(self, x):
-        """Name every anonymous node made since begin() and lay the block out in a column."""
-        new = list(self.nodes)[self._mark:]
+    def end(self, x, label=None):
+        """Name every anonymous node made since begin(), lay the block out in a column and frame it."""
+        new = [n for n in list(self.nodes)[self._mark:] if n.bl_idname != "NodeFrame"]
         for i, node in enumerate(new):
             if not node.name.startswith(naming.NODE_PREFIX):
                 node.name = naming.layer_node(self.lid, "n{}".format(self.n))
                 self.n += 1
-            node.location = (x + (i % 4) * 180, -(i // 4) * 160)
-            node.width = 150
+            node.location = (x + (i % 3) * 190, -(i // 3) * 170)
+            node.width = 160
+        if label and new:
+            frame = self.nodes.new("NodeFrame")
+            frame.name = naming.layer_node(self.lid, "frame")
+            frame.label = label
+            frame.label_size = 16
+            for node in new:
+                node.parent = frame
 
     def named(self, idname, role, **kw):
         props = kw.pop("props", None)
         n = self.node(idname, props=props, **kw)
         n.name = naming.layer_node(self.lid, role)
+        n.label = role
         return n
 
     def value_node(self, role, v):
@@ -127,351 +140,269 @@ class _B(Tree):
         n.outputs[0].default_value = (*rgb[:3], 1.0)
         return n.outputs[0]
 
-    def group(self, name, role, **inputs):
-        assets.ensure_groups((name,))
-        return self.named("ShaderNodeGroup", role, props={"node_tree": bpy.data.node_groups[name]}, **inputs)
+    def ramp(self, role, value, stops):
+        """A Color Ramp with two grey stops [(position, grey), (position, grey)] (Linear)."""
+        n = self.named("ShaderNodeValToRGB", role)
+        set_stops(n, stops)
+        self.set(n.inputs["Fac"], value)
+        return n.outputs["Color"]
+
+    def shared(self, idname, role):
+        """A node made once per stack (RW::stack::<role>), reused by every layer."""
+        name = naming.layer_node("stack", role)
+        n = self.nodes.get(name)
+        if n is None:
+            n = self.nodes.new(idname)
+            n.name = name
+            n.label = role
+            n.location = (-400, 400 + 160 * len([x for x in self.nodes if x.name.startswith("RW::stack::")]))
+        return n
+
+
+def set_stops(ramp_node, stops):
+    els = ramp_node.color_ramp.elements
+    (p0, g0), (p1, g1) = stops
+    if p1 < p0:  # Color Ramp sorts its stops; keep element 0 first
+        (p0, g0), (p1, g1) = (p1, g1), (p0, g0)
+    els[0].position, els[0].color = min(max(p0, 0.0), 1.0), (g0, g0, g0, 1.0)
+    els[1].position, els[1].color = min(max(p1, 0.0), 1.0), (g1, g1, g1, 1.0)
 
 
 def _paint_uv(b):
-    """One shared UV Map node (RW_Paint) per stack: masks are sampled through it only."""
-    n = b.nodes.get(naming.layer_node("stack", "uv"))
-    if n is None:
-        n = b.nodes.new("ShaderNodeUVMap")
-        n.name = naming.layer_node("stack", "uv")
-        n.uv_map = naming.UV_PAINT
-        n.location = (-300, 300)
+    n = b.shared("ShaderNodeUVMap", "uv")
+    n.uv_map = naming.UV_PAINT
     return n.outputs[0]
 
 
-def _image_node(b, role, image, vector, non_color=True, box=False, cubic=False):
+def _geometry_normal(b):
+    return b.shared("ShaderNodeNewGeometry", "geometry").outputs["Normal"]
+
+
+def _image(b, role, image, vector, non_color=True, box=True):
     n = b.named("ShaderNodeTexImage", role)
     n.image = image
-    n.interpolation = "Cubic" if cubic else "Linear"
+    n.interpolation = "Linear"
     if box:
         n.projection = "BOX"
-        n.projection_blend = 0.2
+        n.projection_blend = BOX_BLEND
     b.links.new(vector, n.inputs["Vector"])
-    if image is not None and non_color and image.colorspace_settings.name != "Non-Color" and image.get(naming.IMG_MASK):
+    if image is not None and non_color and image.colorspace_settings.name != "Non-Color" and (
+            image.get(naming.IMG_MASK) or image.get(naming.IMG_BAKED_SOURCE)):
         image.colorspace_settings.name = "Non-Color"
     return n
 
 
-def _box_vector(b, role, scale, rotation=0.0, offset=0.0):
-    tc = b.named("ShaderNodeTexCoord", role + ".tc")
-    mp = b.named("ShaderNodeMapping", role + ".map")
+def _box_vector(b, role, scale, offset=0.0):
+    """SET-3: Object coordinates -> Mapping with Scale in metres (and an offset)."""
+    tc = b.shared("ShaderNodeTexCoord", "texcoord")
+    mp = b.named("ShaderNodeMapping", role)
     s = 1.0 / max(scale, 1e-4)
     mp.inputs["Scale"].default_value = (s, s, s)
-    mp.inputs["Rotation"].default_value = (0.0, 0.0, rotation)
     mp.inputs["Location"].default_value = (offset, offset * 0.7, offset * 0.3)
     b.links.new(tc.outputs["Object"], mp.inputs["Vector"])
     return mp.outputs["Vector"]
 
 
+def _hsv(b, role, color, hue, sat, val):
+    h, s, v = K.hsv_inputs(hue, sat, val)
+    n = b.named("ShaderNodeHueSaturation", role, Hue=h, Saturation=s, Value=v)
+    b.set(n.inputs["Color"], color)
+    return n.outputs["Color"]
+
+
+# ---------------------------------------------------------------- texture sets
+def texture_set(b, ts, role="tex"):
+    """LT-1..LT-3: a loaded set, box mapped. {'color', 'roughness', 'metallic', 'height'}; a channel
+    the set does not have is None. Height is in metres: (map - 0.5) x Bump Strength."""
+    vec = _box_vector(b, role + ".map", ts.scale)
+    out = {"color": None, "roughness": None, "metallic": None, "height": None}
+    if ts.color is not None:
+        out["color"] = _image(b, role + ".color", ts.color, vec, non_color=False).outputs["Color"]
+    rough = None
+    if ts.packed is not None:  # ARM / ORM: R ambient occlusion, G roughness, B metallic
+        sep = b.named("ShaderNodeSeparateColor", role + ".split")
+        b.links.new(_image(b, role + ".packed", ts.packed, vec).outputs["Color"], sep.inputs["Color"])
+        rough, out["metallic"] = sep.outputs["Green"], sep.outputs["Blue"]
+    if ts.roughness is not None:
+        rough = _image(b, role + ".rough", ts.roughness, vec).outputs["Color"]
+        if ts.gloss:
+            rough = b.sub(1.0, rough)
+    if rough is not None:
+        roff = b.named("ShaderNodeMath", role + ".roff", props={"operation": "ADD", "use_clamp": True})
+        b.links.new(rough, roff.inputs[0])
+        roff.inputs[1].default_value = ts.roughness_offset
+        out["roughness"] = roff.outputs[0]
+    if ts.metallic is not None:
+        out["metallic"] = _image(b, role + ".metal", ts.metallic, vec).outputs["Color"]
+    if ts.height is not None:
+        h = _image(b, role + ".height", ts.height, vec).outputs["Color"]
+        bump = b.named("ShaderNodeMath", role + ".bump", props={"operation": "MULTIPLY"})
+        b.links.new(b.sub(h, 0.5), bump.inputs[0])
+        bump.inputs[1].default_value = ts.bump
+        out["height"] = bump.outputs[0]
+    return out
+
+
 # ---------------------------------------------------------------- masks
-def _generator(b, kind, role, angle=0.7853982):
-    if kind == "UP":
-        return b.outp(b.group(naming.SH_UP, role, Angle=angle), "Up")
-    attr = {"EDGE": naming.ATTR_EDGE, "CAVITY": naming.ATTR_CAVITY, "CONTACT": naming.ATTR_CONTACT}[kind]
-    n = b.named("ShaderNodeAttribute", role, props={"attribute_type": "GEOMETRY", "attribute_name": attr})
-    return n.outputs["Fac"]
-
-
-def _ingredient(b, layer, i, ing, masks):
-    role = "ing{}".format(i)
-    if ing.kind == "GRUNGE":
-        if ing.image is None:
-            return None
-        vec = _box_vector(b, role, ing.scale, ing.rotation, ing.seed)
-        src = b.outp(_image_node(b, role + ".img", ing.image, vec, box=True), "Color")
-    elif ing.kind == "REFERENCE":
-        src = masks.get(ing.ref_layer_id)
-        if src is None:
-            return None
-    else:
-        src = _generator(b, ing.kind, role + ".gen", ing.angle)
-    c = b.group(naming.SH_CONTRAST, role + ".contrast", Value=src, Contrast=ing.contrast,
-                Invert=1.0 if ing.invert else 0.0)
-    return b.mul(b.outp(c), b.value_node(role + ".amount", ing.amount))
-
-
-def _vertex_mask(b, layer):
-    n = b.named("ShaderNodeVertexColor", "vmask", props={"layer_name": naming.ATTR_VMASK + layer.id})
-    return n.outputs["Color"], n.outputs["Alpha"]
-
-
-_SHARED_NORM = {"bh": ("Height", "base_height_lo", "base_height_hi"), "ao": ("AO", "base_ao_lo", "base_ao_hi")}
-
-
-def _shared_norm(b, mat, role):
-    """SRC-1/SRC-2: a base map (a stack input, sampled once outside the stack) normalised to 0..1
-    by ONE Map Range per stack, shared by every layer that uses it."""
-    name = naming.layer_node("stack", role)
-    n = b.nodes.get(name)
-    sock, lo, hi = _SHARED_NORM[role]
-    if n is None:
-        n = b.nodes.new("ShaderNodeMapRange")
-        n.name = name
-        n.clamp = True
-        b.links.new(b.gi.outputs[sock], n.inputs["Value"])
-        n.location = (-300, 500 if role == "bh" else 650)
-    st = mat.realworn
-    n.inputs[1].default_value, n.inputs[2].default_value = getattr(st, lo), getattr(st, hi)
-    return n.outputs["Result"]
-
-
-def base_height_norm(b, mat):
-    return _shared_norm(b, mat, "bh")
-
-
-def _grunge(b, role, img, scale, rotation=0.0, offset=0.0, cubic=False, anti_tile=False):
-    """A box-projected grunge lookup; with anti-tiling (SRC-6) two lookups blended per cell."""
-    vec = _box_vector(b, role, scale, rotation, offset)
-    if not anti_tile:
-        return b.outp(_image_node(b, role + ".img", img, vec, box=True, cubic=cubic), "Color")
-    at = b.group(naming.SH_ANTI_TILE, role + ".at", Vector=vec, Seed=offset)
-    first = _image_node(b, role + ".img", img, b.outp(at, "A"), box=True, cubic=cubic)
-    second = _image_node(b, role + ".img2", img, b.outp(at, "B"), box=True, cubic=cubic)
-    return b.mixf(b.outp(at, "Blend"), first.outputs["Color"], second.outputs["Color"])
-
-
-_EDGE_GROUPS = {"ERODE": naming.SH_EDGE_ERODE, "BURN": naming.SH_EDGE_BURN, "HEIGHT": naming.SH_EDGE_HEIGHT}
-
-
-def edge_detail(b, layer, m):
-    """EDG-1..EDG-7: the Edge Detail stage on combined mask `m`; `m` itself when off (Strength 0
-    or no source: no nodes at all, lean compile)."""
-    from . import detail
-    det = layer.detail
-    if det.strength <= 0.0:
-        return m
-    mat = layer.id_data
-    src, img = detail.resolve(mat, layer)
-    if src == "BASE_HEIGHT":
-        d = base_height_norm(b, mat)
-    elif src == "BASE_AO":
-        d = _shared_norm(b, mat, "ao")
-    elif src == "CONTENT_HEIGHT":
-        d = _channel_image(b, "height", layer.height, True).outputs["Color"]  # shared with the channel
-    elif src == "LAYER_GRUNGE":
-        d = _grunge(b, "edge", img, det.scale, det.rotation, det.offset, det.cubic, det.anti_tile)
-    elif src == "GRUNGE2":
-        d = _grunge(b, "edge", img, det.scale2, det.rotation, det.offset, det.cubic, det.anti_tile)
-    else:
-        return m
-    if det.mix2 > 0.0 and det.image2 is not None and src != "GRUNGE2":
-        # a second, smaller breakup on top of any source (two scales of breakup)
-        d2 = _grunge(b, "edge2", det.image2, det.scale2, det.rotation, det.offset + 3.7, det.cubic, det.anti_tile)
-        d = b.clamp(b.add(d, b.mul(b.sub(d2, 0.5), b.value_node("edge.mix2", det.mix2))))
-    if det.contrast != 0.0 or det.invert:  # identity at the defaults: no nodes (lean; bump runs it 3x)
-        d = b.outp(b.group(naming.SH_CONTRAST, "edge.contrast", Value=d, Contrast=det.contrast,
-                           Invert=1.0 if det.invert else 0.0))
-    b.detail_d = d  # the content look's Grunge input (CNT-3 Rust pitting, Scratches grooves)
-    kw = dict(Mask=m, Detail=d, Strength=det.strength, Width=det.width, Threshold=det.threshold)
-    if det.mode == "ERODE":
-        kw["Protect"] = 1.0 if det.protect else 0.0
-    return b.outp(b.group(_EDGE_GROUPS[det.mode], "edge", **kw))
-
-
-def build_mask(b, layer, masks, base_height, decal_alpha=None):
-    """The layer's final mask socket, or None when nothing can show (PRD mask formula; v2.1 adds
-    Edge Detail after paint-over and ingredients, before Edge Lock)."""
-    P = None
-    for i, ing in enumerate(layer.ingredients):
-        term = _ingredient(b, layer, i, ing, masks)
-        if term is not None:
-            P = term if P is None else b.add(P, term)
-    if decal_alpha is not None:  # decals: the projected image is the procedural part
-        P = decal_alpha if P is None else b.max(P, decal_alpha)
-    if P is not None:
-        P = b.clamp(P)
-    if layer.use_vertex_mask:
-        col, alpha = _vertex_mask(b, layer)
-        P = b.outp(b.group(naming.SH_PAINT_OVER, "paint", Procedural=P if P is not None else 0.0, Paint=col,
-                           Alpha=alpha))
-    elif layer.mask_image is not None:
-        tex = _image_node(b, "mask", layer.mask_image, _paint_uv(b))
-        P = b.outp(b.group(naming.SH_PAINT_OVER, "paint", Procedural=P if P is not None else 0.0,
-                           Paint=tex.outputs["Color"], Alpha=tex.outputs["Alpha"]))
-    if P is None:
+def _painted(b, layer, channel="Color"):
+    """The layer's painted image through RW_Paint (one lookup: a Decals layer reads its colour from
+    the same node)."""
+    if layer.mask_image is None:
         return None
-    b.pre_detail = P
-    P = edge_detail(b, layer, P)
-    if layer.lock_source != "NONE":
-        lock = _generator(b, layer.lock_source, "lock.gen")
-        P = b.outp(b.group(naming.SH_EDGE_LOCK, "lock", Mask=P, Lock=lock, Strength=layer.lock_strength))
-    if layer.use_height_blend:
-        P = b.outp(b.group(naming.SH_HEIGHT_BLEND, "hblend", Mask=P, Height=base_height, Amount=layer.height_blend))
-    b.raw_mask = P  # before Levels: damage dents use the soft falloff for their bowl shape
-    P = b.outp(b.group(naming.SH_LEVELS, "levels", Mask=P, Threshold=layer.threshold, Softness=layer.softness))
-    return b.mul(P, b.value_node("opacity", layer.opacity))
+    node = b.nodes.get(naming.layer_node(b.lid, "mask"))
+    if node is None:
+        node = _image(b, "mask", layer.mask_image, _paint_uv(b), non_color=layer.kind != "DECALS", box=False)
+    return node.outputs[channel]
+
+
+def _grunge(b, layer, role="breakup"):
+    vec = _box_vector(b, role + ".map", layer.breakup_scale, layer.breakup_offset)
+    return _image(b, role + ".img", layer.breakup_grunge, vec).outputs["Color"]
+
+
+def _edge_source(b, layer):
+    """EDW-1: Bevel normal . geometry normal, (1 - dot) x 10; the grunge through a Map Range into
+    the Bevel radius makes the worn band irregular."""
+    w = layer.width_mm / 1000.0
+    if layer.breakup_amount > 0 and layer.breakup_grunge is not None:
+        mr = b.named("ShaderNodeMapRange", "edge.radius")
+        b.links.new(_grunge(b, layer), mr.inputs["Value"])
+        mr.inputs[3].default_value = w * (1.0 - layer.breakup_amount)
+        mr.inputs[4].default_value = w
+        radius = mr.outputs["Result"]
+    else:
+        radius = b.value_node("edge.radius", w)
+    bevel = b.named("ShaderNodeBevel", "bevel", props={"samples": layer.bevel_samples})
+    b.links.new(radius, bevel.inputs["Radius"])
+    dot = b.vmath("DOT_PRODUCT", bevel.outputs["Normal"], _geometry_normal(b))
+    return b.math("MULTIPLY_ADD", dot, -K.EDGE_GAIN, K.EDGE_GAIN, label="edge (1 - dot) x 10")
+
+
+def _ao_source(b, layer):
+    """DRT-1: Ambient Occlusion, Color Ramp (white in corners)."""
+    ao = b.named("ShaderNodeAmbientOcclusion", "ao", props={"samples": K.AO_SAMPLES, "only_local": layer.only_local},
+                 Distance=layer.distance_cm / 100.0)
+    lo, hi = K.AO_RAMP
+    return b.ramp("ao.ramp", ao.outputs["AO"], ((lo, 1.0), (hi, 0.0)))
+
+
+def source(b, layer):
+    """The layer's mask source S, or None when nothing can show."""
+    kind = layer.kind
+    if kind == "VARIATION":
+        return (1.0, 1.0, 1.0, 1.0)
+    if kind in ("PAINT", "REVEAL"):
+        return _painted(b, layer)
+    if kind == "DECALS":
+        return _painted(b, layer, "Alpha")
+    if layer.edge_source == "BAKED" and layer.baked_image is not None:
+        s = _image(b, "baked", layer.baked_image, _paint_uv(b), box=False).outputs["Color"]
+    elif kind == "EDGE_WEAR":
+        s = _edge_source(b, layer)
+    else:
+        s = _ao_source(b, layer)
+    painted = _painted(b, layer)
+    if painted is not None:  # EDW-3 / DRT-3: touch-ups on top
+        s = b.max(s, painted)
+    return s
+
+
+def build_mask(b, layer):
+    """MSK-1: M = ramp_{t,w}(S - a ramp_g(G)) x opacity, as real Mix (Subtract) and Color Ramp
+    nodes. None when the layer has nothing to show."""
+    S = source(b, layer)
+    if S is None:
+        return None
+    if layer.breakup_amount > 0 and layer.breakup_grunge is not None and layer.kind != "EDGE_WEAR":
+        g = b.ramp("breakup.ramp", _grunge(b, layer), ((K.breakup_stops(layer.breakup_contrast)[0], 0.0),
+                                                      (K.breakup_stops(layer.breakup_contrast)[1], 1.0)))
+        sub = b.named("ShaderNodeMix", "breakup.sub", props={"data_type": "RGBA", "blend_type": "SUBTRACT",
+                                                             "clamp_result": False})
+        ins = {s.identifier: s for s in sub.inputs}
+        ins["Factor_Float"].default_value = layer.breakup_amount
+        b.set(ins["A_Color"], S)
+        b.set(ins["B_Color"], g)
+        S = next(s for s in sub.outputs if s.identifier == "Result_Color")
+    lo, hi = K.ramp_stops(layer.threshold, layer.sharpness)
+    m = b.ramp("ramp", S, ((lo, 0.0), (hi, 1.0)))
+    op = b.named("ShaderNodeMath", "opacity", props={"operation": "MULTIPLY"})
+    b.links.new(m, op.inputs[0])
+    op.inputs[1].default_value = layer.opacity
+    return op.outputs[0]
 
 
 # ---------------------------------------------------------------- content
-def _channel_image(b, name, ch, scalar):
-    """The image node of a channel with an image source, made once per layer block (Edge Detail's
-    Content Height source and the channel itself share it)."""
-    role = name
-    existing = b.nodes.get(naming.layer_node(b.lid, role + ".img"))
-    if existing is not None:
-        return existing
-    baked = bool(ch.image.get("rw_baked"))  # Flatten output: painted space, sampled through RW_Paint
-    if baked:
-        vec = _paint_uv(b)
-    elif ch.use_uv:
-        vec = b.outp(b.named("ShaderNodeUVMap", role + ".uv"))
-    else:
-        vec = _box_vector(b, role, ch.scale)
-    return _image_node(b, role + ".img", ch.image, vec, non_color=scalar, box=not (ch.use_uv or baked))
-
-
-def _channel_source(b, layer, name, ch, scalar):
-    """The B value of one channel: flat value, image, PBR set map or tinted grunge."""
-    role = name
-    if ch.source in ("IMAGE", "PBRSET") and ch.image is not None:
-        img = _channel_image(b, name, ch, scalar)
-        out = img.outputs["Color"]
-        if ch.invert:  # glossiness used as roughness
-            out = b.sub(1.0, out)
-        if name == "height":  # image height (0..1) scaled by the channel value in mm
-            out = b.mul(out, b.value_node(role + ".value", ch.value))
+def content(b, layer, cur):
+    """{'color', 'roughness', 'metallic', 'height'} the layer lays down; None keeps what is below."""
+    out = {"color": None, "roughness": None, "metallic": None, "height": None}
+    kind, c = layer.kind, layer.content
+    if kind == "DECALS":
+        out["color"] = _hsv(b, "hsv", _painted(b, layer, "Color"), layer.hue, layer.saturation, layer.value)
+        out["roughness"] = b.value_node("rough", layer.roughness)
         return out
-    if scalar:
-        return b.value_node(role + ".value", ch.value)
-    col = b.rgb_node(role + ".value", ch.color)
-    if ch.source == "TINTED_GRUNGE" and ch.grunge is not None:
-        vec = _box_vector(b, role + ".tg", 1.0)
-        g = b.outp(_image_node(b, role + ".grunge", ch.grunge, vec, box=True), "Color")
-        var = b.value_node(role + ".variation", ch.variation)
-        k = b.mixf(g, b.inv(var), 1.0)
-        col = b.mix(1.0, col, b.comb(k, k, k), blend="MULTIPLY")
-    return col
+    if c == "TEXTURE" and layer.texture.loaded():
+        ts = texture_set(b, layer.texture)
+        out.update(ts)
+        base = ts["color"] if ts["color"] is not None else b.rgb_node("color", layer.color)
+        out["color"] = _hsv(b, "hsv", base, layer.hue, layer.saturation, layer.value)
+        if out["roughness"] is None:
+            out["roughness"] = b.value_node("rough", layer.roughness)
+        if out["metallic"] is None:
+            out["metallic"] = 0.0
+        return out
+    if c == "TINT_BELOW":
+        out["color"] = _hsv(b, "hsv", cur["Base Color"], layer.hue, layer.saturation, layer.value)
+        return out
+    # COLOR (and TEXTURE with nothing loaded yet): the tutorial's plain BSDF
+    out["color"] = _hsv(b, "hsv", b.rgb_node("color", layer.color), layer.hue, layer.saturation, layer.value)
+    out["roughness"] = b.value_node("rough", layer.roughness)
+    out["metallic"] = 0.0
+    return out
 
 
-def _blend_scalar(b, mode, mask, cur, val):
-    if mode == "MIN":
-        val = b.min(cur, val)
-    elif mode == "MAX":
-        val = b.max(cur, val)
-    return b.mixf(mask, cur, val)
-
-
-def _blend_height(b, mode, mask, cur, val):
-    if mode == "SUBTRACT":
-        return b.sub(cur, b.mul(mask, val))
-    if mode == "MAX":
-        return b.max(cur, b.mul(mask, val))
-    if mode == "REPLACE":
-        return b.mixf(mask, cur, val)
-    return b.add(cur, b.mul(mask, val))
-
-
-def _look(b, layer, mask):
-    """CNT-1: the layer's RW_Content_<Type> group (None when off or the type has no look)."""
-    lk = layer.look
-    if not lk.enabled or layer.type not in naming.CONTENT_TYPES:
-        return None
-    mat = layer.id_data
-    from . import detail
-    bh = base_height_norm(b, mat) if detail.has_base_height(mat) else 0.5
-    edge = b.pre_detail if b.pre_detail is not None else mask
-    return b.group(naming.content_group(layer.type), "look", Mask=mask, Edge_Mask=edge, Base_Height=bh,
-                   Grunge=b.detail_d if b.detail_d is not None else 0.5, Color_Variation=lk.color_var,
-                   Roughness_Variation=lk.rough_var, Micro=lk.micro, Scale=lk.scale)
-
-
-def apply_content(b, layer, mask, cur, ctx):
-    """Blend the layer's enabled channels over `cur` (dict of sockets), in place."""
-    look = _look(b, layer, mask)
-    var = None
-    if layer.use_variation:
-        var = b.group(naming.SH_VARIATION, "variation", Amount=layer.variation, Scale=layer.variation_scale)
-    if layer.color.enabled:
-        val = _channel_source(b, layer, "color", layer.color, False)
-        if look is not None and layer.color.source in ("FLAT", "TINTED_GRUNGE"):
-            b.links.new(val, look.inputs["Color"])
-            val = b.outp(look, "Color")
-        if layer.ao_image is not None:  # PBR set AO darkens the layer's own colour
-            ao = _channel_image(b, "ao", _AoChannel(layer), True)
-            val = b.mix(1.0, val, ao.outputs["Color"], blend="MULTIPLY")
-        content = b.nodes.get(naming.layer_node(layer.id, "content"))
-        if layer.type == "PAINT" and content is not None:
-            val = b.mix(1.0, val, content.outputs["Color"], blend="MULTIPLY")
-        if var is not None:
-            b.links.new(val, var.inputs["Color"])
-            val = b.outp(var, "Color")
-        blend = layer.color.blend if layer.color.blend in ("MIX", "MULTIPLY", "OVERLAY", "ADD", "DARKEN") else "MIX"
-        b.layer_color = val
-        cur["Base Color"] = b.mix(mask, cur["Base Color"], val, blend=blend)
-    for name, key in (("roughness", "Roughness"), ("metallic", "Metallic")):
-        ch = getattr(layer, name)
-        if ch.enabled:
-            val = _channel_source(b, layer, name, ch, True)
-            if name == "roughness" and look is not None and ch.source == "FLAT":
-                b.links.new(val, look.inputs["Roughness"])
-                val = b.outp(look, "Roughness")
-            if name == "roughness" and var is not None:
-                val = b.clamp(b.add(val, b.outp(var, "Roughness Offset")))
-            mode = ch.blend if ch.blend in ("MIX", "MIN", "MAX") else "MIX"
-            cur[key] = _blend_scalar(b, mode, mask, cur[key], val)
-    if layer.normal_image is not None and any(getattr(layer, c).use_uv for c in ("color", "roughness", "height")):
-        # tangent-space maps are only valid through a UV map (box projection has no tangents;
-        # with box projection the PBR set's height map gives the relief instead)
-        uvn = b.named("ShaderNodeUVMap", "normal.uv")
-        img = _image_node(b, "normal.img", layer.normal_image, uvn.outputs[0], non_color=True)
-        nm = b.named("ShaderNodeNormalMap", "normal.map", Strength=layer.normal_strength)
-        col = img.outputs["Color"]
-        if layer.normal_dx:  # CNT-5: DirectX normal map, flip green for Blender (OpenGL)
-            r, g, bl = b.sep(col)
-            col = b.comb(r, b.sub(1.0, g), bl)
-        b.links.new(col, nm.inputs["Color"])
-        if layer.id_data.realworn.v21:
-            # BMP-2: the layer's normal detail is added to the normal below (masked), so base relief
-            # still reads through: n = normalize(below + mask * (layer - geometry)); world-space
-            # detail blending in the spirit of a reoriented normal blend
-            detail_n = b.vmath("SUBTRACT", nm.outputs["Normal"], _geometry_normal(b))
-            cur["Normal"] = b.vmath("NORMALIZE", b.vmath("ADD", cur["Normal"], b.vmath("SCALE", detail_n, scale=mask)))
-        else:
-            cur["Normal"] = b.mixv(mask, cur["Normal"], nm.outputs["Normal"])  # v2.0 files: unchanged
-    if layer.height.enabled:
-        val = _channel_source(b, layer, "height", layer.height, True)
-        mode = layer.height.blend if layer.height.blend in ("ADD", "SUBTRACT", "MAX", "REPLACE") else "ADD"
-        cur["Height"] = _blend_height(b, mode, mask, cur["Height"], val)
-        ctx["height_used"] = True
-    if look is not None and layer.look.micro > 0.0:  # micro relief joins the ONE shared bump
-        if cur["Height"] is None:
-            cur["Height"] = b.value_node("h0", 0.0)
-        cur["Height"] = b.add(cur["Height"], b.mul(mask, b.outp(look, "Height")))
-        ctx["height_used"] = True
-
-
-def _geometry_normal(b):
-    """One shared Geometry node per stack (the smooth surface normal)."""
-    name = naming.layer_node("stack", "geom")
-    n = b.nodes.get(name)
-    if n is None:
-        n = b.nodes.new("ShaderNodeNewGeometry")
-        n.name = name
-        n.location = (-300, 800)
-    return n.outputs["Normal"]
-
-
-class _AoChannel:
-    """Adapter: the PBR set AO image sampled like the layer's other PBR maps (same projection)."""
-
-    def __init__(self, layer):
-        self.image, self.scale = layer.ao_image, layer.color.scale
-        self.use_uv = layer.color.use_uv
+def blend(b, layer, mask, lay, cur, ctx):
+    """Mix the layer's channels over the stack by its mask, in place."""
+    if layer.kind == "DECALS" and layer.decal_blend == "DARKEN":
+        cur["Base Color"] = b.mix(mask, cur["Base Color"], lay["color"], blend="MULTIPLY")
+    else:
+        cur["Base Color"] = b.mix(mask, cur["Base Color"], lay["color"])
+    if layer.kind == "REVEAL" and layer.edge_dark > 0:
+        # REV-6: a thin darker band where the hole meets the surface: 4 M (1 - M) x Edge Darkening
+        band = b.mul(b.mul(mask, b.inv(mask, clamp=False)), 4.0)
+        k = b.named("ShaderNodeMath", "edgedark", props={"operation": "MULTIPLY"})
+        b.links.new(band, k.inputs[0])
+        k.inputs[1].default_value = layer.edge_dark
+        dark = b.mix(1.0, cur["Base Color"], (0.25, 0.25, 0.25, 1.0), blend="MULTIPLY")
+        cur["Base Color"] = b.mix(k.outputs[0], cur["Base Color"], dark)
+    for key, ch in (("roughness", "Roughness"), ("metallic", "Metallic")):
+        if lay[key] is not None:
+            cur[ch] = b.mixf(mask, cur[ch], lay[key])
+    if layer.kind == "REVEAL":
+        # REV-2: under the mask the height is the under-material's own height minus Depth
+        under = lay["height"] if lay["height"] is not None else 0.0
+        depth = b.named("ShaderNodeMath", "depth", props={"operation": "SUBTRACT"})
+        b.set(depth.inputs[0], under)
+        depth.inputs[1].default_value = layer.depth_mm / 1000.0
+        ctx["height"] = b.mixf(mask, ctx["height"] if ctx["height"] is not None else 0.0, depth.outputs[0])
+    elif lay["height"] is not None and layer.kind != "DECALS":
+        ctx["height"] = b.mixf(mask, ctx["height"] if ctx["height"] is not None else 0.0, lay["height"])
 
 
 # ---------------------------------------------------------------- compile
-def _special(b, layer, mask, cur, ctx):
-    """Type-specific blocks (water, damage, decal) live in their own modules."""
-    if layer.type == "WATER":
-        from . import water
-        water.apply(b, layer, mask, cur, ctx)
-    elif layer.type == "DAMAGE":
-        from . import damage
-        damage.apply_shader(b, layer, mask, cur, ctx)
+def _base(b, mat, cur, ctx):
+    """The Base: the wrapped material, or a texture set loaded onto it (then it replaces the
+    material's look, box mapped, and its height starts the shared height)."""
+    st = mat.realworn
+    if not st.base.loaded():
+        return
+    ts = texture_set(b, st.base)
+    col = ts["color"] if ts["color"] is not None else cur["Base Color"]
+    cur["Base Color"] = _hsv(b, "hsv", col, st.base_hue, st.base_saturation, st.base_value)
+    if ts["roughness"] is not None:
+        cur["Roughness"] = ts["roughness"]
+    cur["Metallic"] = ts["metallic"] if ts["metallic"] is not None else 0.0
+    cur["Normal"] = _geometry_normal(b)
+    ctx["height"] = ts["height"]
 
 
 def compile(mat):
@@ -481,110 +412,52 @@ def compile(mat):
     for n in list(g.nodes):
         g.nodes.remove(n)
     gi, go = _group_io(g)
-    gi.location, go.location = (-600, 0), (300, 0)
+    gi.location, go.location = (-700, 0), (300, 0)
     b = _B(g, gi, go)
+    st = mat.realworn
     cur = {name: gi.outputs[name] for name, _, _ in naming.STACK_INPUTS}
-    base_height = cur["Height"]
-    cur["Height"] = None  # layer height accumulator (mm); None until a layer adds height
-    ctx = {"height_used": False, "flatten": None, "displacement": None, "coverage": None, "mask_view": None,
-           "layer_color": None, "base_height": base_height, "geometry_normal": None}
-    masks = {}
-    active = mat.realworn.active_layer_index
-    for idx, layer in enumerate(mat.realworn.layers):
+    ctx = {"height": None, "coverage": None, "mask_view": None}
+    b.begin("base")
+    _base(b, mat, cur, ctx)
+    b.end(0, "Base: " + (st.base.name or "texture set") if st.base.loaded() else None)
+    active = st.active_layer_index
+    for idx, layer in enumerate(st.layers):
         if not layer.visible:
             continue
         b.begin(layer.id)
-        b.layer_color = None
-        b.pre_detail = None
-        b.detail_d = None
-        decal_alpha = None
-        if layer.type == "DECAL":
-            from . import decals
-            decal_alpha = decals.build_projection(b, layer, cur, ctx)
-        elif layer.type == "PAINT" and layer.content_image is not None:
-            # PNT-10: a Paint layer shows where its colour image was painted (content alpha)
-            content = _image_node(b, "content", layer.content_image, _paint_uv(b), non_color=False)
-            decal_alpha = content.outputs["Alpha"]
-        mask = build_mask(b, layer, masks, base_height, decal_alpha)
+        mask = build_mask(b, layer)
         if mask is not None:
-            masks[layer.id] = mask
-            if cur["Height"] is None and (layer.height.enabled or layer.type in ("DAMAGE", "WATER")):
-                cur["Height"] = b.value_node("h0", 0.0)
-            if layer.type == "DECAL":
-                from . import decals
-                decals.apply_content(b, layer, mask, cur, ctx)
-            elif layer.type == "DAMAGE":
-                from . import damage
-                apply_content(b, layer, damage.content_mask(b, layer, mask, ctx), cur, ctx)
-            else:
-                apply_content(b, layer, mask, cur, ctx)
-            _special(b, layer, mask, cur, ctx)
+            lay = content(b, layer, cur)
+            blend(b, layer, mask, lay, cur, ctx)
             ctx["coverage"] = mask if ctx["coverage"] is None else b.max(ctx["coverage"], mask)
-            if mat.realworn.mask_view and idx == active:
+            if st.mask_view and idx == active and not st.base_active:
                 ctx["mask_view"] = mask
-                if mat.realworn.detail_split and b.pre_detail is not None and layer.detail.strength > 0:
-                    # EDG-8: before | after Edge Detail, side by side on screen (left / right half)
-                    tc = b.named("ShaderNodeTexCoord", "split.tc")
-                    x, _, _ = b.sep(tc.outputs["Window"])
-                    ctx["mask_view"] = b.mixf(b.math("GREATER_THAN", x, 0.5), b.pre_detail, mask)
-                if mat.realworn.view_channel == "COLOR":  # bake helpers read the layer's own colour
-                    ctx["layer_color"] = getattr(b, "layer_color", None)
-        b.end(300 * (idx + 1))
+        b.end(600 * (idx + 1), "{}: {}".format(K.label(layer.kind), layer.name))
     b.begin("stack")
-    normal = cur["Normal"]
-    if mat.realworn.v21 and ctx["displacement"] is not None and cur["Height"] is not None:
-        # BMP-4: with real displacement, all layer relief is ONE height on the Displacement output;
-        # Blender's Displacement and Bump method bumps the fine detail from that same height, so
-        # bump and displacement always agree (and the stack adds no Bump of its own)
-        ctx["displacement"] = b.add(cur["Height"], ctx["displacement"])
-        ctx["height_used"] = False
-    if ctx["height_used"] and cur["Height"] is not None:
-        bump = b.named("ShaderNodeBump", "bump", Strength=1.0, Distance=0.001)
-        b.links.new(cur["Height"], bump.inputs["Height"])
-        b.links.new(normal, bump.inputs["Normal"])
-        normal = bump.outputs["Normal"]
-    if ctx["flatten"] is not None:  # standing water: base bump fades out (WAT-3)
-        geo = b.named("ShaderNodeNewGeometry", "geo")
-        normal = b.mixv(ctx["flatten"], normal, geo.outputs["Normal"])
-    out = dict(cur)
-    out["Normal"] = normal
-    for name, _ in naming.STACK_OUTPUTS:
-        if name in ("Displacement", "Coverage", "Mask View", "Layer Color", "Height"):
-            continue
-        b.links.new(out[name], go.inputs[name])
-    ctx["height_out"] = cur["Height"]  # layer relief in mm (bake reads it)
-    for name, key in (("Displacement", "displacement"), ("Coverage", "coverage"), ("Mask View", "mask_view"),
-                      ("Layer Color", "layer_color"), ("Height", "height_out")):
+    for name in naming.CHANNELS:
+        b.set(go.inputs[name], cur[name])
+    for name, key in (("Displacement", "height"), ("Coverage", "coverage"), ("Mask View", "mask_view")):
         if ctx[key] is not None:
-            b.links.new(ctx[key], go.inputs[name])
-    b.end(300 * (len(mat.realworn.layers) + 1))
-    go.location = (300 * (len(mat.realworn.layers) + 2) + 400, 0)
+            b.set(go.inputs[name], ctx[key])
+    go.location = (600 * (len(st.layers) + 1) + 400, 0)
     after_compile(mat)
     return g
 
 
 def after_compile(mat):
-    """Keep things that live outside the group in step: generators (ING-1), displacement."""
-    from . import damage, injector, setup
-    setup.sync_generators(mat)
+    """Keep what lives outside the group in step: the owned Displacement node, True depth."""
+    from . import injector, reveal
     injector.sync_outputs(mat)
-    damage.sync(mat)
+    reveal.sync(mat)
+
+
+def has_height(mat):
+    g = mat.realworn.stack
+    out = next((n for n in g.nodes if n.bl_idname == "NodeGroupOutput"), None) if g is not None else None
+    return out is not None and out.inputs["Displacement"].is_linked
 
 
 # ---------------------------------------------------------------- callbacks
-_VALUE_ROLES = {
-    # (sub, prop) -> (role, socket or None for outputs[0], transform)
-    (None, "opacity"): ("opacity", None, None),
-    (None, "threshold"): ("levels", "Threshold", None),
-    (None, "softness"): ("levels", "Softness", None),
-    (None, "lock_strength"): ("lock", "Strength", None),
-    (None, "height_blend"): ("hblend", "Amount", None),
-    (None, "variation"): ("variation", "Amount", None),
-    (None, "variation_scale"): ("variation", "Scale", None),
-    (None, "normal_strength"): ("normal.map", "Strength", None),
-}
-
-
 def _set_socket(node, socket, value):
     s = node.outputs[0] if socket is None else node.inputs[socket]
     if s.type == "RGBA" and len(value) == 3:
@@ -592,158 +465,136 @@ def _set_socket(node, socket, value):
     s.default_value = value
 
 
-def on_value(pg, prop):
-    mat = pg.id_data
-    if not isinstance(mat, bpy.types.Material) or suspended(mat) or not mat.realworn.applied:
-        return
-    if not set_value(mat, pg.path_from_id() + "." + prop):
-        compile(mat)
+def _hsv_targets(lid, role, hue, sat, val):
+    h, s, v = K.hsv_inputs(hue, sat, val)
+    return [(lid, role, "Hue", h), (lid, role, "Saturation", s), (lid, role, "Value", v)]
 
 
-def set_value(mat, path):
-    """Write one value property into its node; False when the node is not there (recompile)."""
-    g = mat.realworn.stack
-    m = _PATH.search(path)
-    if g is None or m is None:
-        return False
-    idx, sub, sub_i, prop = int(m.group(1)), m.group(2), m.group(3), m.group(4)
-    if idx >= len(mat.realworn.layers):
-        return False
-    layer = mat.realworn.layers[idx]
-    if not layer.visible:
-        return True  # hidden layers have no nodes; the value is used at the next compile
+def _texture_targets(lid, ts, prop):
+    if prop == "scale":
+        s = 1.0 / max(ts.scale, 1e-4)
+        return [(lid, "tex.map", "Scale", (s, s, s))]
+    if prop == "roughness_offset":
+        return [(lid, "tex.roff", 1, ts.roughness_offset)]
+    if prop == "bump":
+        return [(lid, "tex.bump", 1, ts.bump)]
+    return None
+
+
+def _layer_targets(g, layer, prop):
+    """[(lid, role, socket, value)] for a value property of a layer; None means recompile."""
     lid = layer.id
-    targets = []  # (role, socket, value)
-    if sub is None:
-        if prop in ("lock_width",):
-            from . import setup
-            setup.sync_widths(mat)
-            return True
-        r = _VALUE_ROLES.get((None, prop))
-        if r is None:
-            return False
-        targets.append((r[0], r[1], getattr(layer, prop)))
-    elif sub in ("color", "roughness", "metallic", "height"):
-        ch = getattr(layer, sub)
-        if prop == "color" or prop == "value":
-            targets.append((sub + ".value", None, tuple(ch.color) if prop == "color" else ch.value))
-        elif prop == "scale":
-            s = 1.0 / max(ch.scale, 1e-4)
-            targets.append((sub + ".map", "Scale", (s, s, s)))
-        elif prop == "variation":
-            targets.append((sub + ".variation", None, ch.variation))
-        else:
-            return False
-    elif sub == "ingredients":
-        i = int(sub_i)
-        ing = layer.ingredients[i]
-        role = "ing{}".format(i)
-        if prop == "amount":
-            targets.append((role + ".amount", None, ing.amount))
-        elif prop in ("contrast", "invert"):
-            targets.append((role + ".contrast", "Contrast" if prop == "contrast" else "Invert",
-                            ing.contrast if prop == "contrast" else (1.0 if ing.invert else 0.0)))
-        elif prop in ("scale", "rotation", "seed"):
-            s = 1.0 / max(ing.scale, 1e-4)
-            targets += [(role + ".map", "Scale", (s, s, s)), (role + ".map", "Rotation", (0.0, 0.0, ing.rotation)),
-                        (role + ".map", "Location", (ing.seed, ing.seed * 0.7, ing.seed * 0.3))]
-        elif prop == "angle":
-            targets.append((role + ".gen", "Angle", ing.angle))
-        elif prop == "width":
-            from . import setup
-            setup.sync_widths(mat)
-            return True
-        else:
-            return False
-    elif sub == "water":
-        from . import water
-        targets += water.value_targets(layer, prop)
-    elif sub == "damage":
-        from . import damage
-        handled = damage.on_value(mat, layer, prop)
-        if handled is not None:
-            return handled
-        targets += damage.value_targets(layer, prop)
-    elif sub == "decal":
-        targets.append(("decal", prop.title(), getattr(layer.decal, prop)))
-    elif sub == "look":
-        lk = layer.look
-        sock = {"color_var": "Color Variation", "rough_var": "Roughness Variation", "micro": "Micro",
-                "scale": "Scale"}.get(prop)
-        if sock is None:
-            return False
-        if prop == "micro" and (lk.micro > 0.0) != _micro_linked(g, lid):
-            return False  # micro crossing 0 adds or removes the relief from the shared bump
-        targets.append(("look", sock, getattr(lk, prop)))
-    elif sub == "detail":
-        det = layer.detail
-        edge = g.nodes.get(naming.layer_node(lid, "edge"))
-        if prop == "strength":
-            if det.strength <= 0.0 or edge is None:
-                return False  # EDG-10: crossing 0 adds or removes the stage
-            targets.append(("edge", "Strength", det.strength))
-        elif prop in ("width", "threshold"):
-            targets.append(("edge", prop.title(), getattr(det, prop)))
-        elif prop == "protect":
-            targets.append(("edge", "Protect", 1.0 if det.protect else 0.0))
-        elif prop in ("contrast", "invert"):
-            has = g.nodes.get(naming.layer_node(lid, "edge.contrast")) is not None
-            if has != (det.contrast != 0.0 or det.invert):
-                return False  # leaving or entering the identity adds or removes the group
-            targets.append(("edge.contrast", "Contrast" if prop == "contrast" else "Invert",
-                            det.contrast if prop == "contrast" else (1.0 if det.invert else 0.0)))
-        elif prop in ("scale", "rotation", "offset", "scale2"):
-            o, o2 = det.offset, det.offset + 3.7
-            s1 =1.0 / max(det.scale2 if layer.detail.source == "GRUNGE2" else det.scale, 1e-4)
-            s2 = 1.0 / max(det.scale2, 1e-4)
-            targets += [("edge.map", "Scale", (s1, s1, s1)), ("edge.map", "Rotation", (0.0, 0.0, det.rotation)),
-                        ("edge.map", "Location", (o, o * 0.7, o * 0.3)),
-                        ("edge2.map", "Scale", (s2, s2, s2)), ("edge2.map", "Rotation", (0.0, 0.0, det.rotation)),
-                        ("edge2.map", "Location", (o2, o2 * 0.7, o2 * 0.3)),
-                        ("edge.at", "Seed", o), ("edge2.at", "Seed", o2)]
-        elif prop == "mix2":
-            if det.mix2 <= 0.0 or g.nodes.get(naming.layer_node(lid, "edge.mix2")) is None:
-                return False  # crossing 0 adds or removes the second grunge
-            targets.append(("edge.mix2", None, det.mix2))
-        else:
-            return False
-    else:
+    has = lambda role: g.nodes.get(naming.layer_node(lid, role)) is not None  # noqa: E731
+    if prop == "opacity":
+        return [(lid, "opacity", 1, layer.opacity)]
+    if prop == "color":
+        return [(lid, "color", None, tuple(layer.color))]
+    if prop == "roughness":
+        return [(lid, "rough", None, layer.roughness)]
+    if prop in ("hue", "saturation", "value"):
+        return _hsv_targets(lid, "hsv", layer.hue, layer.saturation, layer.value)
+    if prop in ("threshold", "sharpness"):
+        return [(lid, "ramp", "stops", ((K.ramp_stops(layer.threshold, layer.sharpness)[0], 0.0),
+                                        (K.ramp_stops(layer.threshold, layer.sharpness)[1], 1.0)))]
+    if prop == "breakup_contrast":
+        lo, hi = K.breakup_stops(layer.breakup_contrast)
+        return [(lid, "breakup.ramp", "stops", ((lo, 0.0), (hi, 1.0)))]
+    if prop in ("breakup_scale", "breakup_offset"):
+        s, o = 1.0 / max(layer.breakup_scale, 1e-4), layer.breakup_offset
+        return [(lid, "breakup.map", "Scale", (s, s, s)), (lid, "breakup.map", "Location", (o, o * 0.7, o * 0.3))]
+    if prop == "breakup_amount":
+        if layer.kind == "EDGE_WEAR":
+            return _edge_radius(g, layer)
+        if layer.breakup_amount <= 0 or not has("breakup.sub"):
+            return None  # crossing 0 adds or removes the subtract (lean)
+        return [(lid, "breakup.sub", 0, layer.breakup_amount)]
+    if prop == "width_mm":
+        return _edge_radius(g, layer)
+    if prop == "depth_mm":
+        return [(lid, "depth", 1, layer.depth_mm / 1000.0)]
+    if prop == "edge_dark":
+        if layer.edge_dark <= 0 or not has("edgedark"):
+            return None
+        return [(lid, "edgedark", 1, layer.edge_dark)]
+    if prop == "distance_cm":
+        return [(lid, "ao", "Distance", layer.distance_cm / 100.0)]
+    if prop == "only_local":
+        return [(lid, "ao", "prop:only_local", layer.only_local)]
+    if prop == "bevel_samples":
+        return [(lid, "bevel", "prop:samples", layer.bevel_samples)]
+    return None
+
+
+def _edge_radius(g, layer):
+    """The Bevel radius: a Map Range from the grunge with Breakup, a Value node without; switching
+    between the two recompiles."""
+    w = layer.width_mm / 1000.0
+    node = g.nodes.get(naming.layer_node(layer.id, "edge.radius"))
+    varied = layer.breakup_amount > 0 and layer.breakup_grunge is not None
+    if node is None:
+        return []
+    if varied != (node.bl_idname == "ShaderNodeMapRange"):
+        return None
+    if varied:
+        return [(layer.id, "edge.radius", 3, w * (1.0 - layer.breakup_amount)), (layer.id, "edge.radius", 4, w)]
+    return [(layer.id, "edge.radius", None, w)]
+
+
+def _targets(g, mat, owner_path, prop):
+    st = mat.realworn
+    if owner_path == "realworn":
+        if prop in ("base_hue", "base_saturation", "base_value"):
+            return _hsv_targets("base", "hsv", st.base_hue, st.base_saturation, st.base_value)
+        return None
+    if owner_path == "realworn.base":
+        return _texture_targets("base", st.base, prop)
+    m = _LAYER_PATH.match(owner_path)
+    if m is None or int(m.group(1)) >= len(st.layers):
+        return None
+    layer = st.layers[int(m.group(1))]
+    if not layer.visible:
+        return []  # hidden layers have no nodes; the value is used at the next compile
+    if m.group(2) == "texture":
+        return _texture_targets(layer.id, layer.texture, prop)
+    return _layer_targets(g, layer, prop)
+
+
+def set_value(mat, owner_path, prop):
+    """Write one value property into its node(s). False means recompile."""
+    g = mat.realworn.stack
+    if g is None:
         return False
-    if not targets:
+    targets = _targets(g, mat, owner_path, prop)
+    if targets is None:
         return False
-    for role, sock, value in targets:
+    for lid, role, sock, value in targets:
         node = g.nodes.get(naming.layer_node(lid, role))
         if node is None:
             # compile() is a pure function of the layer data and every structural property
-            # recompiles, so a missing node means this value is not used by the current tree
-            # (disabled channel, nothing painted yet...): nothing to update.
+            # recompiles, so a missing node means the value is not in use (nothing painted yet...)
             continue
         try:
-            _set_socket(node, sock, value)
-        except (KeyError, TypeError):
+            if sock == "stops":
+                set_stops(node, value)
+            elif isinstance(sock, str) and sock.startswith("prop:"):
+                setattr(node, sock[5:], value)
+            else:
+                _set_socket(node, sock, value)
+        except (KeyError, TypeError, IndexError):
             return False
     return True
 
 
-def _micro_linked(g, lid):
-    n = g.nodes.get(naming.layer_node(lid, "look"))
-    return n is not None and n.outputs["Height"].is_linked
-
-
-def on_material_value(mat, prop):
-    """Material-level value properties: the base height normalisation (one shared node)."""
+def on_value(pg, prop):
+    mat = pg.id_data
     if not isinstance(mat, bpy.types.Material) or suspended(mat) or not mat.realworn.applied:
         return
-    g = mat.realworn.stack
-    for role, (_, lo, hi) in _SHARED_NORM.items():
-        n = g.nodes.get(naming.layer_node("stack", role)) if g is not None else None
-        if n is not None:
-            n.inputs[1].default_value = getattr(mat.realworn, lo)
-            n.inputs[2].default_value = getattr(mat.realworn, hi)
+    if not set_value(mat, pg.path_from_id(), prop):
+        compile(mat)
 
 
 def on_active_layer(pg):
-    """Active layer changed: Mask View follows it; painting switches canvas (PRD "While painting")."""
+    """Active layer changed: Mask View follows it; painting switches canvas."""
     mat = pg.id_data
     if not isinstance(mat, bpy.types.Material) or suspended(mat) or not mat.realworn.applied:
         return
@@ -759,9 +610,7 @@ def on_struct(pg):
     mat = pg.id_data
     if not isinstance(mat, bpy.types.Material) or suspended(mat) or not mat.realworn.applied:
         return
+    compile(mat)
     if pg.path_from_id() == "realworn":  # material-level property (Mask View)
         from . import injector
-        compile(mat)
         injector.set_mask_view(mat, mat.realworn.mask_view)
-        return
-    compile(mat)

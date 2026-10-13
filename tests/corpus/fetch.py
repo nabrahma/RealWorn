@@ -4,6 +4,7 @@ Dev-only, never shipped with the add-on. Picks the most downloaded asset per cat
 set is stable over time; pass --list to see the choice without downloading.
 
     python tests/corpus/fetch.py [--res 1k] [--list]
+    python tests/corpus/fetch.py --reference        # v3 reference test sets
 """
 
 import argparse
@@ -17,6 +18,8 @@ UA = {"User-Agent": "RealWorn-dev-test-corpus/0.7 (internal test tool)"}
 # category -> how many assets; covers bricks, concrete, painted/rusty metal, wood, asphalt, tiles, plaster
 WANT = [("brick", 2), ("concrete", 2), ("metal", 2), ("wood", 2), ("asphalt", 1), ("tiles", 1),
         ("plaster", 1), ("cobblestone", 1)]
+# v3: the sets the reference wall uses (base plaster, second material, under-material)
+REFERENCE_SETS = ["red_plaster_weathered", "beige_wall_001", "plaster_grey_04"]
 
 
 def _get(url):
@@ -54,8 +57,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--res", default="1k")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--assets", nargs="*", help="fetch these asset ids instead of the category picks")
+    ap.add_argument("--reference", action="store_true", help="fetch the reference wall texture sets")
     a = ap.parse_args()
-    picked = choose()
+    picked = a.assets if a.assets else (REFERENCE_SETS if a.reference else choose())
     print("assets:", ", ".join(picked))
     if a.list:
         return

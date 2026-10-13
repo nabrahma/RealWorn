@@ -1,17 +1,7 @@
-"""Application handlers: never lose paint on save (SAV-2), never save Mask View, decal upkeep."""
+"""Application handlers: never lose paint on save (SAV-2), never save Mask View."""
 
 import bpy
 from bpy.app.handlers import persistent
-
-
-@persistent
-def _on_load_post(*_args):
-    """Files saved with an older RealWorn get the current shared groups and recompiled stacks."""
-    from .core import assets
-    try:
-        assets.upgrade_open_file()
-    except Exception as ex:  # never block loading a file
-        print("[RealWorn] upgrade on load failed:", ex)
 
 
 @persistent
@@ -37,25 +27,9 @@ def _on_save_post(*_args):
             injector.set_mask_view(mat, True)
 
 
-@persistent
-def _on_depsgraph(scene, depsgraph):
-    try:
-        from .core import damage, decals, images
-    except ImportError:
-        return
-    decals.on_depsgraph_update(scene, depsgraph)
-    for upd in depsgraph.updates:  # DMG-4: a stroke on a Geometry-mode Damage mask re-cuts
-        if isinstance(upd.id, bpy.types.Image):
-            img = bpy.data.images.get(upd.id.name)
-            if img is not None and images.is_rw_image(img):
-                damage.refresh_live(img)
-
-
 _HANDLERS = (
-    (bpy.app.handlers.load_post, _on_load_post),
     (bpy.app.handlers.save_pre, _on_save_pre),
     (bpy.app.handlers.save_post, _on_save_post),
-    (bpy.app.handlers.depsgraph_update_post, _on_depsgraph),
 )
 
 

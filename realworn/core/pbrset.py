@@ -1,11 +1,16 @@
-"""PBR Set content (LAY-2, v2.1 CNT-5..CNT-7): pick a folder (or files); maps are detected by
-name, the way Node Wrangler's Principled setup does (idea only, no code copied): color / albedo /
-diffuse / basecolor, rough (or gloss, inverted), metal, normal (OpenGL or DirectX, detected),
-height / disp, ao. Poly Haven (`x_nor_dx_1k`) and ambientCG (`X_1K-PNG_NormalDX`) names work.
-A size in the folder or file name (`2K_1m`, `rust_50cm`) sets the projection scale.
+"""Load Texture (LT-1..LT-5): pick a folder (or files); maps are detected by name, the way Node
+Wrangler's Principled setup does (idea only, no code copied):
 
-The content library (CNT-6) is a folder of such sets, shown as thumbnails per layer type."""
+  color, albedo, diffuse, basecolor; rough (or gloss, inverted); metal; normal (OpenGL or
+  DirectX, detected); height, disp, displacement; ao; packed ARM / ORM maps (R ambient occlusion,
+  G roughness, B metallic), split in the shader.
 
+Poly Haven (`x_nor_dx_1k`, `x_arm_1k`) and ambientCG (`X_1K-PNG_NormalDX`) names work. A size in
+the folder or file name (`2K_1m`, `rust_50cm`) sets Scale, else 1 m (LT-2). The library (LT-4) is a
+folder of such sets, shown as thumbnails, plus Recent.
+"""
+
+import json
 import os
 import re
 
@@ -21,14 +26,12 @@ KEYS = {
     "normal": ("normal_gl", "nor_gl", "normal", "nrm", "nor", "normalgl"),
     "height": ("height", "displacement", "disp", "bump"),
     "ao": ("ambientocclusion", "ambient_occlusion", "occlusion", "ao"),
+    "packed": ("arm", "orm"),
 }
 _SIZE = re.compile(r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*(m|cm)(?![a-z])")
-# CNT-6: which layer types a library set suits, from its category folder or name
-CATEGORY_WORDS = (("RUST", ("rust", "corrosion", "oxid")), ("DIRT", ("dirt", "mud", "soil", "grime")),
-                  ("DUST", ("dust", "sand", "powder")), ("WATER", ("water", "puddle", "wet")),
-                  ("SCRATCHES", ("scratch",)), ("WEAR", ("metal", "steel", "iron", "aluminium", "aluminum")),
-                  ("DAMAGE", ("concrete", "brick", "plaster", "stone", "wood", "rock")), ("PAINT", ("paint",)))
 _SPLIT = re.compile(r"[^a-z0-9]+")
+RECENT_MAX = 8
+_recent_fallback = []  # unregistered (tests): Recent lives here instead of the preferences
 
 
 def _lookup(word):
@@ -60,9 +63,9 @@ def classify(filename):
 
 
 def detect(paths):
-    """{channel: path} from a folder path or a list of files; first match per channel wins,
-    an OpenGL normal is preferred over a DirectX one (then 'normal_is_dx' is set), a roughness
-    map over a glossiness one."""
+    """{channel: path} from a folder path or a list of files; first match per channel wins, an
+    OpenGL normal is preferred over a DirectX one ('normal_is_dx' marks a DirectX one), a roughness
+    map over a glossiness one, separate maps over a packed one."""
     if isinstance(paths, str):
         folder = bpy.path.abspath(paths)
         paths = [os.path.join(folder, f) for f in sorted(os.listdir(folder))] if os.path.isdir(folder) else [folder]
@@ -85,7 +88,7 @@ def detect(paths):
 
 
 def scale_from_name(paths):
-    """CNT-5: a real-world size in the folder or file names (`2K_1m`, `rust_50cm`), in metres."""
+    """LT-2: a real-world size in the folder or file names (`2K_1m`, `rust_50cm`), in metres."""
     if isinstance(paths, str):
         paths = [paths]
     for p in paths:
@@ -98,17 +101,64 @@ def scale_from_name(paths):
     return None
 
 
-def category(name, parent=""):
-    """The layer type a library set suits (from its category folder, else its name), or 'ALL'."""
-    for text in (parent.lower(), name.lower()):
-        for kind, words in CATEGORY_WORDS:
-            if any(w in text for w in words):
-                return kind
-    return "ALL"
+def set_name(paths):
+    """A display name for a set: its folder (or the parent of a 'textures' folder)."""
+    p = paths if isinstance(paths, str) else os.path.dirname(paths[0])
+    p = bpy.path.abspath(p).rstrip("/\\")
+    name = os.path.basename(p)
+    if name.lower() in ("textures", "maps", "tex") and os.path.dirname(p):
+        name = os.path.basename(os.path.dirname(p))
+    return name.replace("_", " ")
 
 
+def load(path, non_color):
+    img = bpy.data.images.load(path, check_existing=True)
+    img.colorspace_settings.name = "Non-Color" if non_color else "sRGB"
+    return img
+
+
+def assign(ts, paths, scale=None):
+    """Fill a texture set (RWTextureSet) from detected maps. `scale` None: from the name, else 1 m.
+    Images are replaced; Scale, Roughness offset and Bump strength are kept unless a scale is given
+    or found in the name (LT-5). Returns the channels found."""
+    maps = detect(paths)
+    if not maps:
+        return []
+    if scale is None:
+        scale = scale_from_name(list(maps.values()))
+    done = []
+    gloss = "gloss" in maps and "roughness" not in maps
+    ts.color = load(maps["color"], False) if "color" in maps else None
+    ts.roughness = load(maps.get("roughness") or maps.get("gloss"), True) if ("roughness" in maps or gloss) else None
+    ts.gloss = gloss
+    ts.metallic = load(maps["metallic"], True) if "metallic" in maps else None
+    ts.height = load(maps["height"], True) if "height" in maps else None
+    ts.normal = load(maps["normal"], True) if "normal" in maps else None
+    ts.normal_dx = bool(maps.get("normal_is_dx"))
+    ts.ao = load(maps["ao"], True) if "ao" in maps else None
+    ts.packed = load(maps["packed"], True) if "packed" in maps else None
+    if scale is not None:
+        ts.scale = scale
+    folder = paths if isinstance(paths, str) else os.path.dirname(paths[0])
+    ts.folder = folder
+    ts.name = set_name(paths)
+    for ch in ("color", "roughness", "metallic", "height", "normal", "ao", "packed"):
+        if getattr(ts, ch) is not None:
+            done.append(ch + (" (from gloss)" if ch == "roughness" and gloss else "")
+                        + (" (DirectX)" if ch == "normal" and ts.normal_dx else ""))
+    add_recent(folder)
+    return done
+
+
+def clear(ts):
+    for ch in ("color", "roughness", "metallic", "height", "normal", "ao", "packed"):
+        setattr(ts, ch, None)
+    ts.name, ts.folder, ts.gloss = "", "", False
+
+
+# ------------------------------------------------------------------ library
 def library(folder):
-    """CNT-6: every PBR set under `folder` (a directory with at least a colour or height map).
+    """LT-4: every texture set under `folder` (a directory with a colour or height map).
     Returns [{"name", "path", "category", "thumb"}], sorted by name."""
     folder = bpy.path.abspath(folder) if folder else ""
     out = []
@@ -119,25 +169,48 @@ def library(folder):
         maps = detect([os.path.join(root, f) for f in sorted(files)])
         if "color" in maps or "height" in maps:
             rel = os.path.relpath(root, folder)
-            parent = rel.split(os.sep)[0] if os.sep in rel else ""
-            name = os.path.basename(root)
-            out.append({"name": name, "path": root, "category": category(name, parent),
+            out.append({"name": set_name(root), "path": root,
+                        "category": rel.split(os.sep)[0] if os.sep in rel else "",
                         "thumb": maps.get("color") or maps.get("height")})
     return sorted(out, key=lambda e: e["name"].lower())
 
 
-def load(path, non_color):
-    img = bpy.data.images.load(path, check_existing=True)
-    img.colorspace_settings.name = "Non-Color" if non_color else "sRGB"
-    return img
+def _prefs():
+    try:
+        from ..props import prefs
+        return prefs()
+    except Exception:
+        return None
+
+
+def recent():
+    p = _prefs()
+    if p is None:
+        return list(_recent_fallback)
+    try:
+        return [r for r in json.loads(p.recent_textures or "[]") if isinstance(r, str)]
+    except ValueError:
+        return []
+
+
+def add_recent(folder):
+    folder = bpy.path.abspath(folder)
+    items = [folder] + [r for r in recent() if os.path.normcase(r) != os.path.normcase(folder)]
+    items = items[:RECENT_MAX]
+    p = _prefs()
+    if p is None:
+        _recent_fallback[:] = items
+    else:
+        p.recent_textures = json.dumps(items)
+    return items
 
 
 _previews = None
 _enum_items = []
 
 
-def library_enum_items(folder, kind="ALL"):
-    """Enum items (with thumbnails) of the content library sets that suit layer type `kind`."""
+def library_enum_items(folder):
+    """Enum items with thumbnails: Recent first, then the library folder's sets."""
     global _previews
     _enum_items.clear()
     try:
@@ -146,20 +219,24 @@ def library_enum_items(folder, kind="ALL"):
             _previews = bpy.utils.previews.new()
     except Exception:
         _previews = None
-    i = 0
-    for e in library(folder):
-        if kind not in ("ALL", None) and e["category"] not in (kind, "ALL"):
-            continue
+    entries, seen = [], set()
+    for r in recent():
+        if os.path.isdir(r):
+            maps = detect(r)
+            entries.append({"name": "Recent: " + set_name(r), "path": r,
+                            "thumb": maps.get("color") or maps.get("height")})
+            seen.add(os.path.normcase(r))
+    entries += [e for e in library(folder) if os.path.normcase(e["path"]) not in seen]
+    for i, e in enumerate(entries):
         icon = 0
         if _previews is not None and e["thumb"]:
             key = e["path"]
             if key not in _previews:
                 _previews.load(key, e["thumb"], "IMAGE")
             icon = _previews[key].icon_id
-        _enum_items.append((e["path"], e["name"].replace("_", " "), e["path"], icon, i))
-        i += 1
+        _enum_items.append((e["path"], e["name"], e["path"], icon, i))
     if not _enum_items:
-        _enum_items.append(("NONE", "No PBR sets for this layer type", "", 0, 0))
+        _enum_items.append(("NONE", "No texture sets (set a Texture Library folder in Preferences)", "", 0, 0))
     return _enum_items
 
 
@@ -169,43 +246,3 @@ def free_previews():
         import bpy.utils.previews
         bpy.utils.previews.remove(_previews)
         _previews = None
-
-
-def assign(mat, layer, paths, scale=None):
-    """Use a detected PBR set as the layer's content. `scale` None: from the folder name, else
-    1 m. Returns the channels assigned."""
-    from . import compiler
-    maps = detect(paths)
-    if scale is None:
-        scale = scale_from_name(list(maps.values()) if maps else paths) or 1.0
-    if "gloss" in maps and "roughness" not in maps:
-        maps["roughness"] = maps.pop("gloss")
-        gloss = True
-    else:
-        gloss = False
-    done = []
-    with compiler.batch(mat):
-        for ch in ("color", "roughness", "metallic", "height"):
-            if ch not in maps:
-                continue
-            c = getattr(layer, ch)
-            c.image = load(maps[ch], non_color=ch != "color")
-            c.source = "PBRSET"
-            c.enabled = True
-            c.scale = scale
-            c.invert = gloss and ch == "roughness"
-            if ch == "height" and c.value == 0.0:
-                c.value = 1.0  # 1 mm of relief per unit of height map
-            done.append(ch + (" (from gloss)" if c.invert else ""))
-        if "normal" in maps:
-            layer.normal_image = load(maps["normal"], non_color=True)
-            layer.normal_dx = bool(maps.get("normal_is_dx"))
-            done.append("normal" + (" (DirectX)" if layer.normal_dx else ""))
-        if "ao" in maps:
-            layer.ao_image = load(maps["ao"], non_color=True)
-            done.append("ao")
-        if "height" in maps and layer.type in ("WEAR", "RUST") and layer.detail.strength > 0:
-            layer.detail.source = "CONTENT_HEIGHT"  # CNT-7: edges follow the paint texture
-            done.append("edge detail: content height")
-    compiler.compile(mat)
-    return done

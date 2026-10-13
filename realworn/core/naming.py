@@ -1,108 +1,49 @@
 """Names, prefixes and schema versions shared by every RealWorn module.
 
-Nothing else in the code base hardcodes an attribute, property, image or group name.
+Nothing else in the code base hardcodes an attribute, property, image or node name.
 """
 
-SCHEMA = 2  # v2: layer stack (material.realworn.layers); v0.7 files used 1
+SCHEMA = 3  # v3: six kinds (material.realworn.layers); v2.x files used 2, v0.7 files 1
 LOG_PREFIX = "[RealWorn]"
 
-# Mesh attributes written by RW_Masks / RW_Damage (point-domain floats unless noted).
-ATTR_EDGE = "rw_edge"
-ATTR_CAVITY = "rw_cavity"
-ATTR_CONTACT = "rw_contact"
-ATTR_DAMAGE = "rw_damage"
-ATTR_CUT = "rw_cut"              # internal: cutter faces inside RW_Damage
-ATTR_CORNER = "rw_corner"        # internal: corner cutter points inside RW_Damage
-ATTR_VMASK = "rw_vmask_"         # + layer id: corner byte colour, vertex-colour mask fallback (PNT-11)
-MASK_ATTRS = (ATTR_EDGE, ATTR_CAVITY, ATTR_CONTACT)
-
-# The paint UV map (SET-4): every mask is sampled through it, never through the user's UVs.
+# The paint UV map: every painted mask is sampled through it, never through the user's UVs.
 UV_PAINT = "RW_Paint"
 
 # Object custom properties.
-OB_GROUND = "rw_is_ground"
 OB_SETUP = "rw_setup"            # JSON: original slots, UV state (written by Setup, read by Remove)
 
-# Node groups built by builders/ (shared, appended from assets/realworn_nodes.blend).
-GN_MASKS = "RW_Masks"
-GN_DAMAGE = "RW_Damage"
-SH_LEVELS = "RW_P_Levels"
-SH_PAINT_OVER = "RW_P_PaintOver"
-SH_EDGE_LOCK = "RW_P_EdgeLock"
-SH_HEIGHT_BLEND = "RW_P_HeightBlend"
-SH_UP = "RW_P_Up"
-SH_CONTRAST = "RW_P_Contrast"
-SH_WATER = "RW_P_Water"
-SH_DAMAGE = "RW_P_Damage"
-SH_DECAL_PROJECT = "RW_DecalProject"
-SH_VARIATION = "RW_P_Variation"
-SH_EDGE_ERODE = "RW_P_EdgeErode"     # v2.1 Edge Detail modes (EDG-1..EDG-8)
-SH_EDGE_BURN = "RW_P_EdgeBurn"
-SH_EDGE_HEIGHT = "RW_P_EdgeHeight"
-SH_ANTI_TILE = "RW_P_AntiTile"       # v2.1 SRC-6: per-cell random rotation / offset
-CONTENT_PREFIX = "RW_Content_"       # v2.1 CNT-1: RW_Content_<Type> content looks
-CONTENT_TYPES = ("DIRT", "DUST", "RUST", "WEAR", "SCRATCHES", "WATER", "DAMAGE")
-ALL_GROUPS = (GN_MASKS, GN_DAMAGE, SH_PAINT_OVER, SH_EDGE_LOCK, SH_HEIGHT_BLEND, SH_LEVELS, SH_UP, SH_CONTRAST,
-              SH_VARIATION, SH_WATER, SH_DAMAGE, SH_DECAL_PROJECT, SH_EDGE_ERODE, SH_EDGE_BURN, SH_EDGE_HEIGHT, SH_ANTI_TILE) \
-    + tuple(CONTENT_PREFIX + k.title() for k in CONTENT_TYPES)
-
-# Per-material stack group (CMP-1): only core/compiler.py edits its contents.
+# Per-material stack group: only core/compiler.py edits its contents.
 STACK_PREFIX = "RW_Stack::"
 
 # Modifiers.
-MOD_MASKS = "RW_Masks"
-MOD_DAMAGE = "RW_Damage"
-MOD_DISP_SUBDIV = "RW_DisplaceSubdiv"
-
-# Collections.
-COLL_GROUND = "RW_Ground"
-COLL_DECALS = "RW_Decals"
+MOD_SUBDIV = "RW_TrueDepth"      # REV-5: adaptive Simple subdivision for True depth
 
 # Nodes inserted into user materials (top level) and inside stack groups.
 NODE_PREFIX = "RW::"
 OWNED_PROP = "rw_owned"
 FRAME_LABEL = "RealWorn"
-DECAL_PREFIX = "RW_Decal_"
-INNER_PREFIX = "RW_Inner_"
-UNIQUE_SUFFIX = ".RW"            # SET-3: material duplicated for one object
-DEFAULT_MATERIAL = "RW_Default"  # SET-1: given to empty slots
-MAX_DECALS_PER_MATERIAL = 16
-
-# Base node RealWorn adds to a user tree for an AO map found next to the textures (SRC-4).
-BASE_AO_ROLE = "base_ao"
+UNIQUE_SUFFIX = ".RW"            # SET-6: material duplicated for one object
+DEFAULT_PREFIX = "RW_"           # SET-1: RW_<object>, given to objects without a material
 
 # Image tags (custom properties on images RealWorn creates).
 IMG_MASK = "rw_mask"             # value: "<object>/<layer id>"
-IMG_CONTENT = "rw_content"
+IMG_BAKED_SOURCE = "rw_baked_source"  # ENG-2: baked Edge Wear / Dirt source
 
-# Stack group interface (SET-6). Inputs come from the captured base; outputs feed Principled.
+# Stack group interface. Inputs come from the wrapped base; outputs feed the Principled BSDF and,
+# for Displacement, an owned Displacement node on the Material Output (metres).
 STACK_INPUTS = (
     ("Base Color", "COLOR", (0.8, 0.8, 0.8, 1.0)),
     ("Roughness", "FLOAT", 0.5),
     ("Metallic", "FLOAT", 0.0),
     ("Normal", "VECTOR", None),
-    ("Height", "FLOAT", 0.5),
-    ("Coat Weight", "FLOAT", 0.0),
-    ("Coat Roughness", "FLOAT", 0.03),
-    ("Coat IOR", "FLOAT", 1.5),
-    ("Coat Normal", "VECTOR", None),
-    ("AO", "FLOAT", 1.0),  # v2.1 SRC-4: the base's AO map (sampled once, outside the stack)
 )
 STACK_OUTPUTS = (
     ("Base Color", "COLOR"), ("Roughness", "FLOAT"), ("Metallic", "FLOAT"), ("Normal", "VECTOR"),
-    ("Coat Weight", "FLOAT"), ("Coat Roughness", "FLOAT"), ("Coat IOR", "FLOAT"), ("Coat Normal", "VECTOR"),
-    ("Displacement", "FLOAT"), ("Coverage", "FLOAT"), ("Mask View", "FLOAT"), ("Layer Color", "COLOR"),
-    ("Height", "FLOAT"),
+    ("Displacement", "FLOAT"), ("Coverage", "FLOAT"), ("Mask View", "FLOAT"),
 )
 # Principled inputs routed through the stack.
-CHANNELS = ("Base Color", "Roughness", "Metallic", "Normal", "Coat Weight", "Coat Roughness", "Coat IOR",
-            "Coat Normal")
-NORMAL_CHANNELS = ("Normal", "Coat Normal")
-
-
-def content_group(kind):
-    """RW_Content_<Type> (CNT-1), e.g. RW_Content_Dirt."""
-    return CONTENT_PREFIX + kind.title()
+CHANNELS = ("Base Color", "Roughness", "Metallic", "Normal")
+NORMAL_CHANNELS = ("Normal",)
 
 
 def node_name(role):
@@ -111,7 +52,7 @@ def node_name(role):
 
 
 def layer_node(layer_id, role):
-    """Node name inside a stack group: ``RW::<layer_id>::<role>`` (CMP-3)."""
+    """Node name inside a stack group: ``RW::<layer_id>::<role>``."""
     return "{}{}::{}".format(NODE_PREFIX, layer_id, role)
 
 
@@ -123,22 +64,13 @@ def stack_group_name(material_name):
     return STACK_PREFIX + material_name
 
 
-def mask_image_name(object_name, layer_name):
-    return "RW_{}_{}_mask".format(object_name, layer_name)
-
-
-def content_image_name(object_name, layer_name):
-    return "RW_{}_{}_content".format(object_name, layer_name)
+def mask_image_name(object_name, layer_name, kind="mask"):
+    return "RW_{}_{}_{}".format(object_name, layer_name, kind)
 
 
 def unique_material_name(name):
     return name + UNIQUE_SUFFIX
 
 
-def decal_name(image_name):
-    stem = image_name.rsplit(".", 1)[0]
-    return DECAL_PREFIX + stem
-
-
-def inner_material_name(kind):
-    return INNER_PREFIX + kind
+def default_material_name(object_name):
+    return DEFAULT_PREFIX + object_name

@@ -1,19 +1,7 @@
-"""Builders: Python that creates every RealWorn node group (source of truth).
+"""Builders: Python that generates RealWorn's bundled assets (the source of truth).
 
-Order matters: a group is built after the groups it instances.
+- _dsl.py           the node-building helpers the compiler uses
+- gen_grunges.py    the grunge library (assets/grunges)
+
+v3 has no shared node groups: every node lives in a material's own stack, labelled.
 """
-
-from . import (gn_damage, gn_masks, sh_anti_tile, sh_content, sh_damage, sh_decal, sh_edge_detail, sh_layer_parts,
-               sh_water)
-
-BUILDERS = (gn_masks, gn_damage, sh_layer_parts, sh_edge_detail, sh_anti_tile, sh_content, sh_water, sh_damage,
-            sh_decal)
-
-
-def build_all():
-    """Build every node group into bpy.data and return them."""
-    groups = []
-    for b in BUILDERS:
-        built = b.build()
-        groups.extend(built if isinstance(built, list) else [built])
-    return groups

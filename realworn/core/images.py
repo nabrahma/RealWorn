@@ -1,12 +1,12 @@
-"""Mask and content images: create, size, resize, export, and never lose paint on save.
+"""Painted images: create, size, resize, export, and never lose paint on save.
 
-PNT-1  one RGBA mask per painted layer, RW_<object>_<layer>_mask, non-colour, alpha 0 = not
-       painted (Channel Packed so colour and alpha never premultiply).
-PNT-2  resolution from texel density: px per metre of the object's largest dimension, rounded to
-       a power of two. v2.1 RES-1: 2048 px/m clamped 1024..4096; RES-2 Hero objects: 4096 px/m
-       clamped 2048..8192. Resize and Upgrade Masks keep the paint (bicubic, RES-3).
-RES-4  Damage layers and layers with Height on get float masks (no terraces in bump and
-       displacement); stored as half-float EXR (PNG mode) or packed. Other masks stay 8-bit.
+MSK-3  one image per painted layer, RW_<object>_<layer>_mask on RW_Paint: 2048 px per metre of
+       the object's largest dimension, a power of two clamped 1024..4096, 8-bit. Reveal masks are
+       float so Depth has no stepping (Blender keeps float images at 32 bits in memory; they are
+       stored as half-float EXR in PNG mode). Masks start black: nothing painted.
+DEC-1  a Decals layer's image is RGBA, created fully transparent (alpha 0, the tutorial's key
+       setting); DEC-2 4096 px by default (2048 and 8192 options).
+       Resize and Upgrade Mask keep the paint (bicubic).
 SAV-1  created packed by default; preference PNG writes //textures/realworn/<object>/<image>.png.
 SAV-2  save_pre handler: every dirty RealWorn image is packed or written before the file saves
        (pattern from Ucupaint image_ops.save_pack_all and Paint System image.save_image, see
@@ -21,11 +21,12 @@ import numpy as np
 
 from . import naming
 
-MIN_RES, MAX_RES = 1024, 4096          # v2.1 RES-1 (v2.0: 512..4096)
-HERO_MIN, HERO_MAX = 2048, 8192        # RES-2
-DENSITY, HERO_DENSITY = 2048, 4096     # px per metre of the largest dimension
+MIN_RES, MAX_RES = 1024, 4096
+DENSITY = 2048                         # px per metre of the largest dimension
+DECAL_MIN_DENSITY = 400                # DEC-2: warn below this many decal px per metre
 FORCE_STORAGE = None  # tests set "PACKED" / "PNG" (preferences are unavailable unregistered)
-PRECISION = True  # RES-4 float masks; the v2.0 suites turn it off (tests/conftest.py)
+EMPTY = (0.0, 0.0, 0.0, 1.0)           # a mask with nothing painted
+EMPTY_DECAL = (0.0, 0.0, 0.0, 0.0)     # DEC-1: alpha 0
 
 
 def _prefs():
@@ -36,48 +37,51 @@ def _prefs():
         return None
 
 
-def is_hero(obj):
-    return obj is not None and bool(getattr(getattr(obj, "realworn", None), "hero", False))
-
-
 def texel_resolution(obj, density=None):
-    """PNT-2 / RES-1 / RES-2: power of two of (density px/m * largest world dimension), clamped
-    1024..4096 (Hero objects: 4096 px/m, clamped 2048..8192)."""
-    hero = is_hero(obj)
+    """MSK-3: power of two of (density px/m x largest world dimension), clamped 1024..4096."""
     if density is None:
         p = _prefs()
-        density = HERO_DENSITY if hero else (p.texel_density if p is not None else DENSITY)
+        density = p.texel_density if p is not None else DENSITY
     dim = max(obj.dimensions) if obj is not None else 1.0
     px = max(density * max(dim, 1e-3), 1.0)
     res = 2 ** int(round(math.log2(px)))
-    lo, hi = (HERO_MIN, HERO_MAX) if hero else (MIN_RES, MAX_RES)
-    return int(min(max(res, lo), hi))
+    return int(min(max(res, MIN_RES), MAX_RES))
 
 
 def needs_precision(layer):
-    """RES-4: masks that drive relief get float pixels: Damage, and layers whose Height channel is
-    on with some relief (a value or an image; Custom layers start with Height on at 0 mm)."""
-    h = layer.height
-    return layer.type == "DAMAGE" or bool(h.enabled and (h.value != 0.0 or h.image is not None))
+    """Reveal masks drive Depth: float pixels, no terraces in the height."""
+    return layer.kind == "REVEAL"
+
+
+def layer_resolution(obj, layer):
+    if layer.kind == "DECALS":
+        return int(layer.decal_res)
+    return layer.mask_res or texel_resolution(obj)
+
+
+def decal_density(obj, layer, res=None):
+    """DEC-2: decal pixels per metre of the object's largest dimension."""
+    res = res or (layer.mask_image.size[0] if layer.mask_image is not None else int(layer.decal_res))
+    return res / max(max(obj.dimensions), 1e-3)
 
 
 def mask_bytes(res, precise):
-    """RAM of one RGBA mask: 8-bit, or float (Blender keeps float images as 32-bit in memory)."""
+    """RAM of one RGBA image: 8-bit, or float (32-bit in memory)."""
     return res * res * 4 * (4 if precise else 1)
 
 
-def memory_estimate(obj, mat_layers, hero=None):
-    """RES-2: bytes the masks of these layers would take at the object's (or Hero) density."""
-    if hero is None:
-        res = texel_resolution(obj)
-    else:
-        saved = obj.realworn.hero
-        obj.realworn.hero = hero
-        try:
-            res = texel_resolution(obj)
-        finally:
-            obj.realworn.hero = saved
-    return sum(mask_bytes(res, needs_precision(ly)) for ly in mat_layers), res
+def memory_estimate(obj, layers):
+    """Bytes the painted images of these layers take at their current (or default) size."""
+    total = 0
+    for ly in layers:
+        if ly.mask_image is not None:
+            res = ly.mask_image.size[0]
+        elif ly.kind in ("PAINT", "REVEAL", "DECALS"):
+            res = layer_resolution(obj, ly)
+        else:
+            continue
+        total += mask_bytes(res, needs_precision(ly))
+    return total
 
 
 def _fill(img, rgba):
@@ -86,23 +90,19 @@ def _fill(img, rgba):
 
 
 def is_rw_image(img):
-    return img is not None and (naming.IMG_MASK in img or naming.IMG_CONTENT in img)
+    return img is not None and (naming.IMG_MASK in img or naming.IMG_BAKED_SOURCE in img)
 
 
-def create_mask(obj, layer, res=None, kind="mask"):
-    """New RGBA image for a layer's mask (or content), transparent, tagged, packed or saved."""
-    res = res or (layer.mask_res if layer.mask_res else texel_resolution(obj))
-    name = (naming.mask_image_name if kind == "mask" else naming.content_image_name)(obj.name, layer.name)
-    precise = kind == "mask" and needs_precision(layer) and PRECISION
-    img = bpy.data.images.new(name, res, res, alpha=True, float_buffer=precise)
+def create_mask(obj, layer, res=None):
+    """A new painted image for the layer: a black mask, or for Decals a transparent RGBA image."""
+    res = res or layer_resolution(obj, layer)
+    decal = layer.kind == "DECALS"
+    name = naming.mask_image_name(obj.name, layer.name, "decal" if decal else "mask")
+    img = bpy.data.images.new(name, res, res, alpha=True, float_buffer=needs_precision(layer))
     img.alpha_mode = "CHANNEL_PACKED"
-    if kind == "mask":
-        img.colorspace_settings.name = "Non-Color"
-        _fill(img, (0.0, 0.0, 0.0, 0.0))
-        img[naming.IMG_MASK] = "{}/{}".format(obj.name, layer.id)
-    else:
-        _fill(img, (1.0, 1.0, 1.0, 0.0))
-        img[naming.IMG_CONTENT] = "{}/{}".format(obj.name, layer.id)
+    img.colorspace_settings.name = "sRGB" if decal else "Non-Color"
+    _fill(img, EMPTY_DECAL if decal else EMPTY)
+    img[naming.IMG_MASK] = "{}/{}".format(obj.name, layer.id)
     store(img, obj)
     return img
 
@@ -111,12 +111,6 @@ def ensure_mask(obj, mat, layer):
     if layer.mask_image is None:
         layer.mask_image = create_mask(obj, layer)  # structural: compiles
     return layer.mask_image
-
-
-def ensure_content(obj, mat, layer):
-    if layer.content_image is None:
-        layer.content_image = create_mask(obj, layer, kind="content")
-    return layer.content_image
 
 
 def storage_mode():
@@ -132,7 +126,7 @@ def store(img, obj=None, blend_path=None):
     Returns 'packed' or 'saved'."""
     blend_path = blend_path or bpy.data.filepath
     if storage_mode() == "PNG" and blend_path:
-        owner = (img.get(naming.IMG_MASK) or img.get(naming.IMG_CONTENT) or "realworn/").split("/")[0]
+        owner = (img.get(naming.IMG_MASK) or img.get(naming.IMG_BAKED_SOURCE) or "realworn/").split("/")[0]
         owner = owner or (obj.name if obj else "realworn")
         folder = os.path.join(os.path.dirname(blend_path), "textures", "realworn", bpy.path.clean_name(owner))
         os.makedirs(folder, exist_ok=True)
@@ -144,7 +138,7 @@ def store(img, obj=None, blend_path=None):
             img.filepath_raw = path
             img.file_format = "OPEN_EXR" if precise else "PNG"
             if precise:
-                img.use_half_precision = True  # RES-4: 16-bit half float on disk
+                img.use_half_precision = True  # 16-bit half float on disk
             img.save()
             img.source = "FILE"
             img.filepath = "//" + os.path.relpath(path, os.path.dirname(blend_path)).replace("\\", "/")
@@ -205,8 +199,8 @@ def _resample_axis(arr, n, axis):
 
 
 def resample_bicubic(px, res):
-    """RES-3: bicubic resample of an (h, w, c) array to (res, res, c), clamped to 0..1. Channels
-    that are identical (masks painted white: R = G = B) are resampled once."""
+    """Bicubic resample of an (h, w, c) array to (res, res, c), clamped to 0..1. Channels that are
+    identical (masks painted white: R = G = B) are resampled once."""
     px = px.astype(np.float32, copy=False)
     out = np.empty((res, res, px.shape[2]), np.float32)
     done = {}
@@ -221,13 +215,13 @@ def resample_bicubic(px, res):
 
 
 def upgrade(obj, layer, res=None):
-    """RES-3 / RES-4: resample a layer's mask to the current density (bicubic, paint kept) and
-    convert it to float when the layer drives relief. Returns the (possibly new) image."""
+    """Upgrade Mask (UI-4): resample a layer's image to the current density (bicubic, paint kept)
+    and to float for Reveal. Returns the (possibly new) image."""
     img = layer.mask_image
     if img is None:
         return None
-    res = res or texel_resolution(obj)
-    precise = needs_precision(layer) and PRECISION
+    res = res or layer_resolution(obj, layer)
+    precise = needs_precision(layer)
     if tuple(img.size) == (res, res) and img.is_float == precise:
         return img
     px = resample_bicubic(pixels(img), res) if tuple(img.size) != (res, res) else pixels(img)
@@ -242,17 +236,16 @@ def upgrade(obj, layer, res=None):
     img.user_remap(new)  # the layer and the stack's image node follow
     bpy.data.images.remove(img)
     new.name = name
-    # left dirty and unpacked: the save handler packs or writes it (SAV-2), as after a stroke;
-    # packing 2048 px masks here would triple the time Upgrade Masks takes
+    # left dirty and unpacked: the save handler packs or writes it (SAV-2), as after a stroke
     return new
 
 
-def fill(img, value):
-    """PNT-7 Fill (1: layer everywhere, painted) / Clear (0: back to not painted, alpha 0)."""
+def fill(img, value, decal=False):
+    """PNT-2 Fill (1: the layer everywhere) / Clear (0: nothing painted; decals back to alpha 0)."""
     if value > 0:
         _fill(img, (1.0, 1.0, 1.0, 1.0))
     else:
-        _fill(img, (0.0, 0.0, 0.0, 0.0))
+        _fill(img, EMPTY_DECAL if decal else EMPTY)
     img.update()
     store(img)
 
@@ -265,13 +258,13 @@ def pixels(img):
 
 
 def export_masks(obj, folder):
-    """REM-2 Export Masks: one PNG per painted layer image. Returns the written paths."""
+    """Export Masks (Remove dialog): one PNG per painted layer image. Returns the written paths."""
     from . import setup
     os.makedirs(folder, exist_ok=True)
     out = []
     for mat in setup.layered_materials(obj):
         for ly in mat.realworn.layers:
-            for kind, img in (("mask", ly.mask_image), ("content", ly.content_image)):
+            for kind, img in (("mask", ly.mask_image), ("baked", ly.baked_image)):
                 if img is None:
                     continue
                 path = os.path.join(folder, "{}_{}_{}.png".format(bpy.path.clean_name(mat.name),

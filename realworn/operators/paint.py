@@ -1,9 +1,9 @@
-"""Paint operators (PNT-4..PNT-10): Paint, Exit, Paint / Erase / Reset, Fill, Clear, Resize."""
+"""Paint operators (PNT-1, PNT-2): Paint, Exit, Paint / Erase, Fill, Clear, Resize, Upgrade Mask."""
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 
-from ..core import images, injector, paint
+from ..core import images, injector, kinds, paint
 from .common import resolve_layer, resolve_material
 
 
@@ -20,12 +20,11 @@ class _Target:
 
 
 class RW_OT_paint_enter(_Target, bpy.types.Operator):
-    """Paint this layer's mask: white adds the layer, hold Ctrl to erase"""
+    """Paint this layer: white adds it, hold Ctrl to erase (decals: Ctrl erases alpha)"""
     bl_idname = "realworn.paint_enter"
     bl_label = "Paint"
     bl_options = {"REGISTER", "UNDO"}
 
-    target: EnumProperty(name="Target", items=[("MASK", "Mask", ""), ("CONTENT", "Colour", "")], default="MASK")
     mask_view: BoolProperty(name="Mask View", default=False)
 
     def execute(self, context):
@@ -33,13 +32,13 @@ class RW_OT_paint_enter(_Target, bpy.types.Operator):
         if layer is None:
             self.report({"WARNING"}, "Set up the object and add a layer first")
             return {"CANCELLED"}
-        if self.target == "CONTENT" and layer.type not in ("PAINT", "DECAL"):
-            self.report({"WARNING"}, "Only Paint and Decal layers have a colour image")
+        if not kinds.paintable(layer.kind):
+            self.report({"WARNING"}, "{} layers are not painted: their mask is the grunge".format(
+                kinds.label(layer.kind)))
             return {"CANCELLED"}
         context.view_layer.objects.active = ob
-        img = paint.enter(ob, mat, layer, self.target, self.mask_view)
-        what = img.name if img is not None else "vertex colours"
-        self.report({"INFO"}, "Painting {} ({}). Ctrl erases".format(layer.name, what))
+        img = paint.enter(ob, mat, layer, self.mask_view)
+        self.report({"INFO"}, "Painting {} ({}). Ctrl erases".format(layer.name, img.name))
         return {"FINISHED"}
 
 
@@ -59,14 +58,12 @@ class RW_OT_paint_exit(bpy.types.Operator):
 
 
 class RW_OT_paint_mode(bpy.types.Operator):
-    """Paint adds the layer, Erase removes it (and the procedural fill), Reset returns to the
-    procedural result"""
+    """Paint adds the layer; Erase removes it (on decals: erases alpha)"""
     bl_idname = "realworn.paint_mode"
     bl_label = "Paint Mode"
     bl_options = {"REGISTER"}
 
-    mode: EnumProperty(name="Mode", items=[("PAINT", "Paint", ""), ("ERASE", "Erase", ""),
-                                           ("RESET", "Reset", "")], default="PAINT")
+    mode: EnumProperty(name="Mode", items=[("PAINT", "Paint", ""), ("ERASE", "Erase", "")], default="PAINT")
     object: StringProperty(name="Object", default="")
 
     def execute(self, context):
@@ -85,10 +82,10 @@ class RW_OT_mask_fill(_Target, bpy.types.Operator):
 
     def execute(self, context):
         ob, mat, layer = self._resolve(context)
-        if layer is None:
+        if layer is None or not kinds.paintable(layer.kind):
             return {"CANCELLED"}
         img = images.ensure_mask(ob, mat, layer)
-        images.fill(img, self.value)
+        images.fill(img, self.value, decal=layer.kind == "DECALS")
         return {"FINISHED"}
 
 
@@ -109,7 +106,24 @@ class RW_OT_mask_resize(_Target, bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_paint_enter, RW_OT_paint_exit, RW_OT_paint_mode, RW_OT_mask_fill, RW_OT_mask_resize)
+class RW_OT_upgrade_mask(_Target, bpy.types.Operator):
+    """Resample the layer's painted image to the current texel density (bicubic): the paint is kept"""
+    bl_idname = "realworn.upgrade_mask"
+    bl_label = "Upgrade Mask"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        ob, mat, layer = self._resolve(context)
+        if layer is None or layer.mask_image is None:
+            return {"CANCELLED"}
+        before = tuple(layer.mask_image.size)
+        img = images.upgrade(ob, layer)
+        self.report({"INFO"}, "{}: {} -> {} px".format(layer.name, before[0], img.size[0]))
+        return {"FINISHED"}
+
+
+_classes = (RW_OT_paint_enter, RW_OT_paint_exit, RW_OT_paint_mode, RW_OT_mask_fill, RW_OT_mask_resize,
+            RW_OT_upgrade_mask)
 
 
 def register():

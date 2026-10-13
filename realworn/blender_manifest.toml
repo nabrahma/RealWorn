@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "realworn"
-version = "2.1.0"
+version = "3.0.0"
 name = "RealWorn"
-tagline = "Paint crisp wear, dirt, rust, water and damage as layers"
+tagline = "Paintable texture layers for realistic buildings and surfaces"
 maintainer = "Nabaskar"
 type = "add-on"
 blender_version_min = "5.2.0"
@@ -15,7 +15,7 @@ license = [
 tags = ["Material", "Node"]
 
 [permissions]
-files = "Writes baked textures and reads decal images"
+files = "Reads texture sets, writes baked textures and painted masks"
 
 [build]
 paths_exclude_pattern = [

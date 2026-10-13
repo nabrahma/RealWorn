@@ -1,4 +1,4 @@
-"""Debug tools: Validate, Remove All, Reload Add-on, Rebuild Assets."""
+"""Debug tools: Validate, Remove All, Reload Add-on."""
 
 import bpy
 
@@ -35,19 +35,6 @@ class RW_OT_remove_all(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class RW_OT_rebuild_assets(bpy.types.Operator):
-    """Developer: run the builders, rewrite the asset .blend and upgrade the open file"""
-    bl_idname = "realworn.rebuild_assets"
-    bl_label = "Rebuild Assets"
-
-    def execute(self, context):
-        from ..core import assets
-        path, n = assets.build_asset_file()
-        up = assets.upgrade_open_file()
-        self.report({"INFO"}, "Rebuilt {} groups, upgraded {}".format(n, up))
-        return {"FINISHED"}
-
-
 def _reload_package():
     import importlib
     import sys
@@ -71,7 +58,7 @@ class RW_OT_reload(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_validate, RW_OT_remove_all, RW_OT_rebuild_assets, RW_OT_reload)
+_classes = (RW_OT_validate, RW_OT_remove_all, RW_OT_reload)
 
 
 def register():

@@ -1,32 +1,33 @@
-"""The RealWorn sidebar tab, laid out like a texturing app: header (Setup / Remove, UV status), the
-layer list (top of the list is the top layer, Base pinned at the bottom), then the selected
-layer's Content / Mask / Brush tabs, then Bake. The same panels show in the Image Editor."""
+"""The RealWorn sidebar tab: one short panel (PRD v3 "UI").
+
+  Setup / Remove
+  + Add: Variation | Paint | Reveal | Decals | Edge Wear | Dirt
+  the layer rows (top of the list is the top layer; the Base pinned at the bottom)
+  the selected layer: Content, its kind's control, Breakup, Sharpness, Brush, then > Advanced
+  Bake Material, Export Textures, Bake Edges and AO
+
+If a control is not here, it lives under the layer's Advanced fold or does not exist (UI-3). The
+same panel shows in the Image Editor.
+"""
 
 import bpy
 
-from ..core import injector, layer_types as LT, setup
-
-CHANNELS = (("color", "Color"), ("roughness", "Roughness"), ("metallic", "Metallic"), ("height", "Height (mm)"))
+from ..core import images, injector, kinds as K, setup
 
 
 def op(layout, idname, **kw):
-    """layout.operator that tolerates operators from later milestones not being registered."""
-    if not hasattr(bpy.types, "REALWORN_OT_" + idname.split(".", 1)[1]):  # registered name
+    """layout.operator that tolerates an operator not being registered."""
+    if not hasattr(bpy.types, "REALWORN_OT_" + idname.split(".", 1)[1]):
         r = layout.row()
         r.enabled = False
         r.label(text=kw.get("text") or idname.split(".", 1)[1].replace("_", " ").title(), icon=kw.get("icon", "NONE"))
-        return None
+        return _Null()
     return layout.operator(idname, **kw)
 
 
 class _Null:
     def __setattr__(self, k, v):
         pass
-
-
-def opx(layout, idname, **kw):
-    o = op(layout, idname, **kw)
-    return o if o is not None else _Null()
 
 
 def _context_material(context):
@@ -36,26 +37,42 @@ def _context_material(context):
     return ob, ob.active_material
 
 
+def status(ob, layer, context=None):
+    """UI-2: a short status note for a layer row, or ''."""
+    if layer.kind in ("EDGE_WEAR", "DIRT") and layer.edge_source == "LIVE":
+        shading = getattr(getattr(context, "space_data", None), "shading", None) if context else None
+        if shading is not None and shading.type == "MATERIAL":
+            return "Live - Bake for EEVEE"  # ENG-3
+        return "Live"
+    if layer.kind in ("EDGE_WEAR", "DIRT"):
+        return "Baked"
+    if layer.content == "TEXTURE" and layer.kind != "DECALS" and not layer.texture.loaded():
+        return "no texture loaded"
+    if K.paintable(layer.kind) and layer.mask_image is None and not K.paint_optional(layer.kind):
+        return "not painted"
+    return ""
+
+
 class RW_UL_layers(bpy.types.UIList):
     bl_idname = "RW_UL_layers"
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
         row.prop(item, "visible", text="", emboss=False, icon="HIDE_OFF" if item.visible else "HIDE_ON")
-        row.label(text="", icon=LT.TYPES.get(item.type, LT.TYPES["CUSTOM"])["icon"])
-        row.prop(item, "name", text="", emboss=False)
+        row.label(text="", icon=K.INFO[item.kind]["icon"])
+        name = item.name if item.name.startswith(K.label(item.kind)) else "{}: {}".format(K.label(item.kind), item.name)
+        row.label(text=name)
+        note = status(context.active_object, item, context)
+        if note:
+            sub = row.row()
+            sub.alert = note.startswith("Live -")
+            sub.label(text=note)
         sub = row.row(align=True)
-        sub.scale_x = 0.9
+        sub.scale_x = 0.8
         sub.prop(item, "opacity", text="", slider=True)
-        op = opx(row, "realworn.paint_enter", text="", icon="BRUSH_DATA", emboss=False)
-        op.layer = item.id
-        img = item.mask_image or item.content_image
-        if img is not None:
-            if img.preview is None:
-                img.preview_ensure()
-            row.label(text="", icon_value=img.preview.icon_id if img.preview else 0)
-        else:
-            row.label(text="", icon="BLANK1")
+        if K.paintable(item.kind):
+            o = op(row, "realworn.paint_enter", text="", icon="BRUSH_DATA", emboss=False)
+            o.layer = item.id
 
     def filter_items(self, context, data, propname):
         items = getattr(data, propname)
@@ -72,483 +89,250 @@ class _Base:
     bl_category = "RealWorn"
 
 
-def _draw_header(layout, context, ob, mat):
-    if mat is not None and mat.realworn.applied and mat.realworn.stack is None:
+def _banners(layout, mat):
+    st = mat.realworn
+    if st.applied and st.stack is None:
         box = layout.box()
         box.label(text="Weathered with RealWorn v0.7", icon="ERROR")
-        box.operator("realworn.migrate_v07", icon="LOOP_BACK")
-        return False
-    if ob is None or ob.type != "MESH":
-        layout.label(text="Select a mesh object", icon="INFO")
-        return False
-    box = layout.box()
-    box.label(text=ob.name, icon="OBJECT_DATA")
-    if mat is not None:
-        box.label(text=mat.name, icon="MATERIAL")
-    if not setup.is_setup(ob) or mat is None or not injector.is_setup(mat):
-        row = layout.row(align=True)
-        row.scale_y = 1.4
-        row.operator("realworn.setup", icon="BRUSHES_ALL")
-        layout.prop(context.scene.realworn, "use_existing_uv")
-        if mat is not None and setup.is_setup(ob) and not injector.is_setup(mat):
-            layout.label(text="This material was added after Setup: click Setup again", icon="INFO")
-        return False
-    res = max((ly.mask_image.size[0] for ly in mat.realworn.layers if ly.mask_image), default=0)
-    box.label(text="Painting on RW_Paint" + (", {} px".format(res) if res else ""), icon="UV")
-    if mat.realworn.source_material:
-        box.label(text="Unique copy of {} (was shared)".format(mat.realworn.source_material), icon="LINKED")
-    if not mat.realworn.v21:  # EDG-9: a v2.0 material; nothing changes until this is clicked
-        row = layout.row()
-        row.scale_y = 1.2
-        op = opx(row, "realworn.apply_v21_defaults", icon="SHADERFX")
-        op.material = mat.name
-    return True
-
-
-def _draw_layers(layout, mat):
-    st = mat.realworn
-    row = layout.row()
-    row.template_list("RW_UL_layers", "", st, "layers", st, "active_layer_index", rows=6)
-    col = row.column(align=True)
-    col.operator_menu_enum("realworn.layer_add", "type", text="", icon="ADD")
-    col.operator("realworn.layer_remove", text="", icon="REMOVE")
-    col.separator()
-    col.operator("realworn.layer_move", text="", icon="TRIA_UP").direction = "UP"
-    col.operator("realworn.layer_move", text="", icon="TRIA_DOWN").direction = "DOWN"
-    col.separator()
-    col.operator("realworn.layer_duplicate", text="", icon="DUPLICATE")
-    base = layout.row()
-    base.enabled = False
-    base.label(text="Base: {}".format(st.source_material or mat.name), icon="MATERIAL_DATA")
-
-
-def _channel(layout, layer, key, label):
-    ch = getattr(layer, key)
-    box = layout.box()
-    row = box.row(align=True)
-    row.prop(ch, "enabled", text="")
-    row.label(text=label)
-    if not ch.enabled:
-        return
-    sub = box.row(align=True)  # LAY-3: only the blend modes this channel supports
-    for mode in LT.blends_for(key):
-        sub.prop_enum(ch, "blend", mode)
-    row = box.row(align=True)
-    if key == "color" and ch.source in ("FLAT", "TINTED_GRUNGE"):
-        row.prop(ch, "color", text="")
-    elif key != "color" and ch.source == "FLAT":
-        row.prop(ch, "value", text="Value" if key != "height" else "mm", slider=key != "height")
-    row.prop(ch, "source", text="")
-    if ch.source in ("IMAGE", "PBRSET"):
-        box.template_ID(ch, "image", open="image.open")
-        r = box.row(align=True)
-        r.prop(ch, "scale")
-        r.prop(ch, "use_uv", text="UV", toggle=True)
-        if key == "height":
-            box.prop(ch, "value", text="Height (mm)")
-    elif ch.source == "TINTED_GRUNGE":
-        box.template_ID(ch, "grunge", open="image.open")
-        box.prop(ch, "variation", slider=True)
-
-
-def draw_look(layout, layer):
-    """CNT-2: the textured content look's controls."""
-    if layer.type not in LT.LOOK:
-        return
-    lk = layer.look
-    box = layout.box()
-    row = box.row(align=True)
-    row.prop(lk, "enabled", toggle=True, icon="TEXTURE")
-    if lk.enabled:
-        row.prop(lk, "scale", text="")
-        r = box.row(align=True)
-        r.prop(lk, "color_var", slider=True, text="Color Var.")
-        r.prop(lk, "rough_var", slider=True, text="Rough. Var.")
-        box.prop(lk, "micro", slider=True)
-
-
-def draw_library(layout, context, mat, layer):
-    """CNT-6: thumbnails of the content library's sets for this layer type."""
-    from ..props import prefs
-    p = prefs()
-    if p is None or not p.content_folder:
-        return
-    box = layout.box()
-    box.template_icon_view(context.scene.realworn, "content_set", show_labels=True, scale=4.0)
-    op = opx(box, "realworn.content_load", icon="IMPORT")
-    op.material = mat.name
-
-
-def draw_content(layout, mat, layer):
-    opx(layout, "realworn.pbrset_load", icon="FILEBROWSER")
-    draw_library(layout, bpy.context, mat, layer)
-    draw_look(layout, layer)
-    for key, label in CHANNELS:
-        _channel(layout, layer, key, label)
-    if layer.normal_image is not None:
-        r = layout.row(align=True)
-        r.label(text=layer.normal_image.name, icon="NORMALS_FACE")
-        r.prop(layer, "normal_dx", text="DX", toggle=True)
-        r.prop(layer, "normal_strength", text="")
-    if layer.ao_image is not None:
-        r = layout.row(align=True)
-        r.label(text=layer.ao_image.name, icon="SHADING_RENDERED")
-        r.prop(layer, "ao_image", text="")
-    row = layout.row(align=True)
-    row.prop(layer, "use_variation", toggle=True)
-    if layer.use_variation:
-        row.prop(layer, "variation", slider=True, text="")
-        row.prop(layer, "variation_scale", text="")
-    if layer.type == "WATER":
+        op(box, "realworn.migrate_v07", icon="LOOP_BACK")
+        return True
+    if st.applied and st.schema_version == 2:
         box = layout.box()
-        box.label(text="Water", icon="MOD_FLUIDSIM")
-        for p in ("darken", "depth", "edge"):
-            box.prop(layer.water, p, slider=True)
-    elif layer.type == "DAMAGE":
-        box = layout.box()
-        box.label(text="Damage", icon="MOD_BOOLEAN")
-        box.prop(layer.damage, "depth_mode", expand=True)
-        box.row(align=True).prop(layer.damage, "carve", expand=True)
-        if layer.damage.depth_mode == "DISPLACEMENT":
-            from ..core import damage as _dmg
-            ob = bpy.context.active_object
-            rate = _dmg.dicing_rate(ob, bpy.context.scene) if ob is not None else None
-            if rate:
-                box.label(text="Adaptive dicing: " + rate, icon="MOD_SUBSURF")
-            box.prop(layer.damage, "edge_length")
-        box.prop(layer.damage, "inner")
-        for p in ("depth_mm", "reveal", "rim_height", "rim_width", "rim_brightness", "sharpness"):
-            box.prop(layer.damage, p)
-        if layer.damage.depth_mode == "GEOMETRY":
-            for p in ("threshold", "size_min", "size_max", "density", "debris", "live"):
-                box.prop(layer.damage, p)
-            opx(box, "realworn.damage_apply", icon="CHECKMARK")
-        if layer.damage.get("rw_warning"):  # DMG-9 guards (closed mesh, too coarse)
-            box.label(text=layer.damage["rw_warning"], icon="ERROR")
-        opx(box, "realworn.damage_dirt", icon="BRUSH_DATA")
-    elif layer.type == "DECAL":
-        box = layout.box()
-        box.label(text="Decal", icon="IMAGE_DATA")
-        box.prop(layer.decal, "empty")
-        box.prop(layer.decal, "mode", expand=True)
-        box.prop(layer.decal, "darken", slider=True)
-        opx(box, "realworn.decal_bake", icon="RENDER_STILL")
-    elif layer.type == "PAINT":
-        opx(layout, "realworn.paint_enter", text="Paint Colour", icon="TPAINT_HLT").target = "CONTENT"
+        box.label(text="Painted with RealWorn v2", icon="ERROR")
+        op(box, "realworn.convert_v2", icon="FILE_REFRESH")
+        op(box, "realworn.remove", icon="X")
+        return True
+    return False
 
 
-def draw_edge_detail(layout, mat, layer):
-    """PRD v2.1 Edge Detail (EDG-1..EDG-8)."""
-    from ..core import detail
-    det = layer.detail
-    box = layout.box()
-    row = box.row(align=True)
-    row.label(text="Edge Detail", icon="SHADERFX")
-    row.prop(det, "strength", slider=True, text="")
-    if det.strength <= 0:
-        box.label(text="Off: Strength above 0 lets a detail texture shape the edge", icon="INFO")
-        return
-    box.row(align=True).prop(det, "mode", expand=True)
-    box.prop(det, "source")
-    used, _ = detail.resolve(mat, layer)
-    if det.source == "BASE_HEIGHT" and used != "BASE_HEIGHT":
-        box.label(text="No base height map: using the grunge", icon="INFO")
-    if det.source == "BASE_AO" and used != "BASE_AO":
-        box.label(text="No AO map found: using the grunge", icon="INFO")
-        opx(box, "realworn.pick_ao", icon="FILEBROWSER").material = mat.name
-    if det.source == "CONTENT_HEIGHT" and used != "CONTENT_HEIGHT":
-        box.label(text="This layer has no height image: using the grunge", icon="INFO")
-    if used is None:
-        box.label(text="Pick a grunge image to use Edge Detail", icon="ERROR")
-    if used in ("BASE_HEIGHT", "BASE_AO"):
-        st = mat.realworn
-        key = "base_height" if used == "BASE_HEIGHT" else "base_ao"
-        r = box.row(align=True)
-        r.prop(st, key + "_lo", text="Low")
-        r.prop(st, key + "_hi", text="High")
-        opx(r, "realworn.refresh_base", text="", icon="FILE_REFRESH").material = mat.name
-    if used == "GRUNGE2":
-        box.template_ID(det, "image2", open="image.open")
-        box.prop(det, "scale2")
-    elif used in ("LAYER_GRUNGE", None):
-        box.template_ID(det, "image", open="image.open")
-        r = box.row(align=True)
-        r.prop(det, "scale")
-        r.prop(det, "rotation", text="")
-        r.prop(det, "offset", text="")
-    if used in ("LAYER_GRUNGE", "GRUNGE2"):
-        r = box.row(align=True)
-        r.prop(det, "cubic", toggle=True)
-        r.prop(det, "anti_tile", toggle=True)
-    if used != "GRUNGE2":
-        sub = box.box()
-        r = sub.row(align=True)
-        r.label(text="Second Grunge")
-        r.prop(det, "mix2", slider=True, text="")
-        if det.mix2 > 0 or det.image2 is not None:
-            sub.template_ID(det, "image2", open="image.open")
-            sub.prop(det, "scale2")
-    r = box.row(align=True)
-    r.prop(det, "width", slider=True)
-    r.prop(det, "threshold", slider=True)
-    r = box.row(align=True)
-    r.prop(det, "contrast", slider=True)
-    r.prop(det, "invert", toggle=True)
-    if det.mode == "ERODE":
-        box.prop(det, "protect")
-    box.prop(mat.realworn, "detail_split", toggle=True, icon="MOD_MASK")
-
-
-def draw_mask(layout, mat, layer):
-    st = mat.realworn
-    layout.prop(st, "mask_view", toggle=True, icon="MOD_MASK")
-    draw_edge_detail(layout, mat, layer)
-    box = layout.box()
-    box.label(text="Ingredients (start at 0: pure painting)")
-    for i, ing in enumerate(layer.ingredients):
-        r = box.row(align=True)
-        r.label(text=ing.bl_rna.properties["kind"].enum_items[ing.kind].name)
-        r.prop(ing, "amount", slider=True, text="")
-        op = opx(r, "realworn.ingredient_remove", text="", icon="X")
-        op.index = i
-        if ing.kind == "GRUNGE":
-            r2 = box.row(align=True)
-            r2.template_ID(ing, "image", open="image.open")
-            r3 = box.row(align=True)
-            for p in ("scale", "rotation", "contrast"):
-                r3.prop(ing, p)
-            box.prop(ing, "invert")
-        elif ing.kind in LT.GENERATOR_KINDS:
-            r3 = box.row(align=True)
-            r3.prop(ing, "width")
-            r3.prop(ing, "contrast")
-        elif ing.kind == "UP":
-            box.prop(ing, "angle")
-        elif ing.kind == "REFERENCE":
-            box.prop_search(ing, "ref_layer_id", st, "layers", text="Layer")
-    if hasattr(bpy.types, "REALWORN_OT_ingredient_add"):
-        box.operator_menu_enum("realworn.ingredient_add", "kind", text="Add Ingredient", icon="ADD")
-    box = layout.box()
-    row = box.row(align=True)
-    row.prop(layer, "lock_source")
-    if layer.lock_source != "NONE":
-        row.prop(layer, "lock_strength", slider=True, text="")
-    r = box.row(align=True)
-    r.prop(layer, "threshold", slider=True)
-    r.prop(layer, "softness", slider=True)
-    r = box.row(align=True)
-    r.prop(layer, "use_height_blend", toggle=True)
-    if layer.use_height_blend:
-        r.prop(layer, "height_blend", text="")
-    r = layout.row(align=True)
-    opx(r, "realworn.mask_preset_save", icon="FILE_TICK")
-    opx(r, "realworn.mask_preset_load", icon="FILEBROWSER")
-
-
-def draw_brush(layout, context, mat, layer):
-    sp = context.scene.realworn
-    ob = context.active_object
+def _add_row(layout):
     col = layout.column(align=True)
+    col.label(text="Add")
     row = col.row(align=True)
-    row.scale_y = 1.3
-    if ob is not None and ob.mode == "TEXTURE_PAINT":
-        opx(row, "realworn.paint_exit", icon="LOOP_BACK")
-    else:
-        opx(row, "realworn.paint_enter", icon="BRUSH_DATA").layer = layer.id
+    row.menu("RW_MT_add_variation", text="Variation", icon=K.INFO["VARIATION"]["icon"])
+    o = op(row, "realworn.layer_add", text="Paint", icon=K.INFO["PAINT"]["icon"])
+    o.kind = "PAINT"
+    row.menu("RW_MT_add_reveal", text="Reveal", icon=K.INFO["REVEAL"]["icon"])
     row = col.row(align=True)
-    for mode, icon in (("PAINT", "ADD"), ("ERASE", "REMOVE"), ("RESET", "LOOP_BACK")):
-        opx(row, "realworn.paint_mode", text=mode.title(), icon=icon).mode = mode
-    row = col.row(align=True)
-    opx(row, "realworn.mask_fill", icon="SNAP_FACE").value = 1.0
-    opx(row, "realworn.mask_fill", text="Clear", icon="X").value = 0.0
-    box = layout.box()
-    box.label(text="Grunge", icon="TEXTURE")
-    box.template_icon_view(sp, "grunge_image", show_labels=True, scale=4.0, scale_popup=5.0)
-    box.prop(sp, "grunge_mode", expand=True)
-    r = box.row(align=True)
-    r.prop(sp, "grunge_contrast", slider=True)
-    r.prop(sp, "grunge_invert", toggle=True)
-    opx(box, "realworn.grunge_select", icon="CHECKMARK")
-    ts = context.tool_settings
-    ups = ts.image_paint.unified_paint_settings if ts and ts.image_paint else None
-    brush = ts.image_paint.brush if ts and ts.image_paint else None
-    if ups is not None:
-        col = layout.column(align=True)
-        col.prop(ups, "size", slider=True)
-        col.prop(ups, "strength", slider=True)
-    if brush is not None and brush.name.startswith("RW "):
-        col = layout.column(align=True)
-        col.prop(brush, "spacing")
-        if brush.mask_texture_slot is not None:
-            col.prop(brush.mask_texture_slot, "use_random", text="Random Angle")
-        col.prop(brush, "curve_distance_falloff_preset", text="Falloff")
+    row.menu("RW_MT_add_decals", text="Decals", icon=K.INFO["DECALS"]["icon"])
+    o = op(row, "realworn.layer_add", text="Edge Wear", icon=K.INFO["EDGE_WEAR"]["icon"])
+    o.kind = "EDGE_WEAR"
+    o = op(row, "realworn.layer_add", text="Dirt", icon=K.INFO["DIRT"]["icon"])
+    o.kind = "DIRT"
 
 
-def draw_main(self, context):
-    lay = self.layout
-    ob, mat = _context_material(context)
-    if not _draw_header(lay, context, ob, mat):
-        return
-    _draw_layers(lay, mat)
+def _hsv(layout, owner, prefix=""):
+    row = layout.row(align=True)
+    row.prop(owner, prefix + "hue", text="Hue", slider=True)
+    row.prop(owner, prefix + "saturation", text="Sat", slider=True)
+    row.prop(owner, prefix + "value", text="Val", slider=True)
+
+
+def _texture_row(layout, ts, layer_id):
+    row = layout.row(align=True)
+    o = op(row, "realworn.load_texture", text="Load Texture", icon="FILEBROWSER")
+    o.layer = layer_id
+    o = op(row, "realworn.texture_library", text="", icon="ASSET_MANAGER")
+    o.layer = layer_id
+    row.label(text=ts.name or "none")
+    if ts.loaded():
+        layout.prop(ts, "scale")
+
+
+def draw_base(layout, mat):
     st = mat.realworn
-    if not len(st.layers):
-        lay.label(text="Add a layer with +, then paint it", icon="INFO")
-        return
-    layer = st.layers[min(st.active_layer_index, len(st.layers) - 1)]
-    sp = context.scene.realworn
-    lay.prop(sp, "layer_tab", expand=True)
-    if sp.layer_tab == "CONTENT":
-        draw_content(lay, mat, layer)
-    elif sp.layer_tab == "MASK":
-        draw_mask(lay, mat, layer)
+    box = layout.box()
+    box.label(text="Base: " + (st.base.name or mat.name), icon="MATERIAL")
+    _texture_row(box, st.base, "BASE")
+    if st.base.loaded():
+        _hsv(box, st, "base_")
+        row = box.row(align=True)
+        row.prop(st.base, "roughness_offset")
+        row.prop(st.base, "bump")
     else:
-        draw_brush(lay, context, mat, layer)
-    row = lay.row(align=True)
-    row.operator("realworn.remove", icon="X")
+        box.label(text="Your material, untouched. Load a texture to replace its look.", icon="INFO")
 
 
-class RW_PT_bake(_Base, bpy.types.Panel):
-    bl_space_type = "VIEW_3D"
-    bl_label = "Bake"
-    bl_idname = "RW_PT_bake"
-    bl_options = {"DEFAULT_CLOSED"}
+def draw_layer(layout, context, ob, mat, layer):
+    """UI-3: Content, kind-specific, Breakup, Sharpness, Brush; Advanced folded."""
+    box = layout.box()
+    box.label(text="Selected: {}".format(layer.name), icon=K.INFO[layer.kind]["icon"])
+    # Content
+    col = box.column(align=True)
+    if layer.kind == "DECALS":
+        col.label(text="Content: the painted decal image")
+        _hsv(col, layer)
+        col.prop(layer, "roughness")
+    else:
+        col.row().prop(layer, "content", expand=True)
+        if layer.content == "TEXTURE":
+            _texture_row(col, layer.texture, layer.id)
+        elif layer.content == "COLOR":
+            row = col.row(align=True)
+            row.prop(layer, "color", text="")
+            row.prop(layer, "roughness")
+        _hsv(col, layer)
+    # kind-specific
+    col = box.column(align=True)
+    if layer.kind == "REVEAL":
+        row = col.row(align=True)
+        row.prop(layer, "depth_mm", text="Depth (mm)")
+        row.prop(layer, "true_depth")
+        if layer.true_depth:
+            from ..core import reveal
+            warn = reveal.density_warning(ob)
+            if warn:
+                col.label(text=warn, icon="ERROR")
+    elif layer.kind == "EDGE_WEAR":
+        col.prop(layer, "width_mm", text="Width (mm)")
+    elif layer.kind == "DIRT":
+        row = col.row(align=True)
+        row.prop(layer, "distance_cm", text="Distance (cm)")
+        row.prop(layer, "only_local")
+    elif layer.kind == "DECALS":
+        col.prop(layer, "decal_res")
+        dens = images.decal_density(ob, layer)
+        col.label(text="{:.0f} px per metre".format(dens),
+                  icon="ERROR" if dens < images.DECAL_MIN_DENSITY else "INFO")
+        if dens < images.DECAL_MIN_DENSITY:
+            col.label(text="Low for a large building: use 8K or split it into parts")
+    if layer.kind in ("EDGE_WEAR", "DIRT"):
+        col.row().prop(layer, "edge_source", expand=True)
+        op(col, "realworn.bake_sources", text="Bake Edges and AO", icon="RENDER_STILL")
+    # Breakup
+    col = box.column(align=True)
+    row = col.row(align=True)
+    row.label(text="Breakup")
+    o = op(row, "realworn.breakup_pick", text=(layer.breakup_grunge.name if layer.breakup_grunge else "pick"),
+           icon="TEXTURE")
+    o.layer = layer.id
+    row.prop(layer, "breakup_amount", text="Amount", slider=True)
+    # Sharpness
+    row = box.row(align=True)
+    row.prop(layer, "sharpness", slider=True)
+    row.prop(layer, "threshold", slider=True)
+    # Brush
+    if K.paintable(layer.kind):
+        row = box.row(align=True)
+        brush = K.INFO[layer.kind]["paint"]
+        if brush == "RW Damage":
+            op(row, "realworn.damage_alpha_pick", text="Damage Alpha", icon="BRUSH_DATA")
+        elif brush == "RW Stencil":
+            op(row, "realworn.decal_pick", text="Decal", icon="IMAGE_DATA")
+        o = op(row, "realworn.paint_enter", text="Paint", icon="BRUSH_DATA")
+        o.layer = layer.id
+        row.prop(mat.realworn, "mask_view", text="Mask View", toggle=True)
+    elif layer.kind == "VARIATION":
+        box.label(text=K.TIPS["VARIATION"], icon="INFO")
+    if layer.kind == "DECALS":
+        box.label(text=K.TIPS["DECALS"], icon="INFO")
+    # Advanced (UI-4)
+    adv = box.column(align=True)
+    adv.prop(layer, "show_advanced", icon="TRIA_DOWN" if layer.show_advanced else "TRIA_RIGHT", emboss=False)
+    if layer.show_advanced:
+        adv.prop(layer, "breakup_contrast")
+        adv.prop(layer, "breakup_scale")
+        adv.prop(layer, "breakup_offset")
+        if layer.content == "TEXTURE" and layer.texture.loaded():
+            adv.prop(layer.texture, "roughness_offset")
+            adv.prop(layer.texture, "bump")
+        if layer.kind == "REVEAL":
+            adv.prop(layer, "edge_dark")
+        if layer.kind == "EDGE_WEAR":
+            adv.prop(layer, "bevel_samples")
+        if layer.kind == "DECALS":
+            adv.prop(layer, "decal_blend")
+        if K.paintable(layer.kind) and layer.kind != "DECALS":
+            adv.prop(layer, "mask_res")
+        row = adv.row(align=True)
+        o = op(row, "realworn.upgrade_mask", text="Upgrade Mask")
+        o.layer = layer.id
+        o = op(row, "realworn.mask_fill", text="Fill")
+        o.layer, o.value = layer.id, 1.0
+        o = op(row, "realworn.mask_fill", text="Clear")
+        o.layer, o.value = layer.id, 0.0
 
-    @classmethod
-    def poll(cls, context):
-        ob, mat = _context_material(context)
-        return mat is not None and injector.is_setup(mat)
+
+def _bake_rows(layout, mat):
+    col = layout.column(align=True)
+    if mat.realworn.baked:
+        op(col, "realworn.restore_live", icon="LOOP_BACK")
+    row = col.row(align=True)
+    op(row, "realworn.bake", text="Bake Material", icon="RENDER_STILL")
+    op(row, "realworn.export_textures", text="Export Textures", icon="EXPORT")
+    op(col, "realworn.bake_sources", text="Bake Edges and AO", icon="MOD_BEVEL")
+
+
+class _PanelBody:
+    bl_label = "RealWorn"
 
     def draw(self, context):
-        p = context.scene.realworn
-        lay = self.layout
+        layout = self.layout
         ob, mat = _context_material(context)
-        if mat.realworn.baked:
-            lay.label(text="Showing baked textures", icon="IMAGE_DATA")
-        opx(lay, "realworn.flatten", icon="RENDERLAYERS")
-        lay.prop(p, "bake_resolution")
-        lay.prop(p, "bake_folder")
-        row = lay.row(align=True)
-        opx(row, "realworn.bake", icon="RENDER_STILL")
-        opx(row, "realworn.restore_live", icon="LOOP_BACK")
-        row = lay.row(align=True)
-        row.prop(p, "export_preset", text="")
-        opx(row, "realworn.export_textures", icon="EXPORT")
-
-
-class RW_PT_sharpness(_Base, bpy.types.Panel):
-    """PRD v2.1 diagnostics: settings that cap texture resolution, and what limits the edge."""
-    bl_space_type = "VIEW_3D"
-    bl_label = "Sharpness"
-    bl_idname = "RW_PT_sharpness"
-    bl_options = {"DEFAULT_CLOSED"}
-
-    @classmethod
-    def poll(cls, context):
-        ob, mat = _context_material(context)
-        return mat is not None and injector.is_setup(mat)
-
-    def draw(self, context):
-        from ..core import diagnostics
-        lay = self.layout
-        ob, mat = _context_material(context)
-        row = lay.row(align=True)
-        h = opx(row, "realworn.hero_toggle", text="Hero: On" if ob.realworn.hero else "Hero: Off",
-                icon="SOLO_ON" if ob.realworn.hero else "SOLO_OFF", depress=ob.realworn.hero)
-        h.object = ob.name
-        opx(row, "realworn.upgrade_masks", icon="IMAGE_REFERENCE").object = ob.name
-        found = diagnostics.check(context.preferences.system, context.scene, setup.materials_of(ob))
-        opx(lay, "realworn.sharpness_report", icon="VIEWZOOM").object = ob.name
-        import json
-        rep = context.scene.get("rw_sharpness_report")
-        if rep:
-            try:
-                data = json.loads(rep)
-            except ValueError:
-                data = {}
-            if data.get("object") == ob.name:
-                col = lay.box().column(align=True)
-                col.label(text="Edge width at {} px".format(data.get("px", 512)))
-                for name, w, lim in data.get("rows", []):
-                    col.label(text="{}: {}".format(name, "{:.1f} px".format(w) if w else "no edge"))
-                    col.label(text="   limited by " + lim)
-        if not found:
-            lay.label(text="No settings limit texture resolution", icon="CHECKMARK")
-        for f in found:
-            box = lay.box()
-            col = box.column(align=True)
-            for i, line in enumerate(_wrap(f["text"], 42)):
-                col.label(text=line, icon=("ERROR" if f["level"] == "WARNING" else "INFO") if i == 0 else "BLANK1")
-            if f["fix"]:
-                opx(box, f["fix"])
+        if ob is None or ob.type != "MESH":
+            layout.label(text="Select a mesh object", icon="INFO")
+            return
+        row = layout.row(align=True)
+        if not setup.is_setup(ob):
+            row.prop(context.scene.realworn, "uv_method", text="")
+            op(row, "realworn.setup", text="Setup", icon="ADD")
+            return
+        op(row, "realworn.setup", text="Setup", icon="FILE_REFRESH")
+        op(row, "realworn.remove", text="Remove", icon="X")
+        if mat is None:
+            layout.label(text="No material in the active slot", icon="INFO")
+            return
+        if _banners(layout, mat) or not injector.is_setup(mat):
+            return
         st = mat.realworn
-        if st.layers and 0 <= st.active_layer_index < len(st.layers):
-            layer = st.layers[st.active_layer_index]
-            rows = diagnostics.readout(ob, layer)
-            if rows:
-                col = lay.column(align=True)
-                col.label(text="{}: texels per cm".format(layer.name))
-                limit = min(rows, key=lambda r: r[1])[0] if len(rows) > 1 else None
-                for name, px in rows:
-                    col.label(text="  {}: {:.1f}{}".format(name, px, "  (limits the edge)" if name == limit else ""))
-
-
-def _wrap(text, width):
-    words, lines, cur = text.split(), [], ""
-    for w in words:
-        if len(cur) + len(w) + 1 > width and cur:
-            lines.append(cur)
-            cur = w
+        _add_row(layout)
+        row = layout.row()
+        row.template_list("RW_UL_layers", "", st, "layers", st, "active_layer_index", rows=5)
+        col = row.column(align=True)
+        o = op(col, "realworn.layer_move", text="", icon="TRIA_UP")
+        o.direction = "UP"
+        o = op(col, "realworn.layer_move", text="", icon="TRIA_DOWN")
+        o.direction = "DOWN"
+        op(col, "realworn.layer_duplicate", text="", icon="DUPLICATE")
+        op(col, "realworn.layer_remove", text="", icon="X")
+        base = layout.row(align=True)
+        o = op(base, "realworn.layer_select", text="Base   {}".format(st.base.name or mat.name),
+               icon="MATERIAL", depress=st.base_active or not len(st.layers))
+        o.index = -1
+        if st.base_active or not len(st.layers):
+            draw_base(layout, mat)
         else:
-            cur = (cur + " " + w).strip()
-    return lines + [cur] if cur else lines
+            draw_layer(layout, context, ob, mat, st.layers[st.active_layer_index])
+        _bake_rows(layout, mat)
 
 
-class RW_PT_tools(_Base, bpy.types.Panel):
+class RW_PT_main(_PanelBody, _Base, bpy.types.Panel):
     bl_space_type = "VIEW_3D"
-    bl_label = "Decals, Ground, Debug"
-    bl_idname = "RW_PT_tools"
+    bl_idname = "RW_PT_main"
+
+
+class RW_PT_image(_PanelBody, _Base, bpy.types.Panel):
+    bl_space_type = "IMAGE_EDITOR"
+    bl_idname = "RW_PT_image"
+
+
+class RW_PT_debug(_Base, bpy.types.Panel):
+    bl_space_type = "VIEW_3D"
+    bl_idname = "RW_PT_debug"
+    bl_label = "Debug"
     bl_options = {"DEFAULT_CLOSED"}
 
     def draw(self, context):
-        p = context.scene.realworn
-        lay = self.layout
-        lay.template_icon_view(p, "decal_image", show_labels=True, scale=4.0)
-        lay.prop(p, "decal_mode", expand=True)
-        lay.prop(p, "decal_size")
-        row = lay.row(align=True)
-        for cursor in (False, True):
-            op = opx(row, "realworn.decal_place", text="At Cursor" if cursor else "Place Decal",
-                     icon="PIVOT_CURSOR" if cursor else "RESTRICT_SELECT_OFF")
-            op.use_cursor, op.mode, op.size = cursor, p.decal_mode, p.decal_size
-        row = lay.row(align=True)
-        row.operator("realworn.mark_ground", icon="VIEW_PERSPECTIVE").state = True
-        row.operator("realworn.mark_ground", text="", icon="X").state = False
-        lay.operator("realworn.validate", icon="CHECKMARK")
-        lay.operator("realworn.remove_all", icon="TRASH")
+        col = self.layout.column(align=True)
+        op(col, "realworn.validate", icon="CHECKMARK")
+        op(col, "realworn.remove_all", icon="TRASH")
         from ..props import prefs
-        pr = prefs()
-        if pr is not None and pr.developer_mode:
-            row = lay.row(align=True)
-            row.operator("realworn.reload", icon="FILE_REFRESH")
-            row.operator("realworn.rebuild_assets", icon="NODETREE")
+        p = prefs()
+        if p is not None and p.developer_mode:
+            op(col, "realworn.reload", icon="FILE_REFRESH")
 
 
-class RW_PT_main(_Base, bpy.types.Panel):
-    bl_space_type = "VIEW_3D"
-    bl_label = "RealWorn"
-    bl_idname = "RW_PT_main"
-    draw = draw_main
-
-
-class RW_PT_image_main(_Base, bpy.types.Panel):
-    """The same panel in the Image Editor sidebar, so painting in 2D UV view also works."""
-    bl_space_type = "IMAGE_EDITOR"
-    bl_label = "RealWorn"
-    bl_idname = "RW_PT_image_main"
-    draw = draw_main
-
-
-_classes = (RW_UL_layers, RW_PT_main, RW_PT_bake, RW_PT_sharpness, RW_PT_tools, RW_PT_image_main)
+_classes = (RW_UL_layers, RW_PT_main, RW_PT_image, RW_PT_debug)
 
 
 def register():

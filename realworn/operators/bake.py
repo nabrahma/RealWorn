@@ -1,4 +1,4 @@
-"""Bake family (BAK-1..BAK-4) and the v0.7 Remove path."""
+"""Bake family (UI-5): Bake Material, Restore Live Stack, Export Textures, and the v0.7 Remove path."""
 
 import os
 
@@ -7,11 +7,7 @@ from bpy.props import EnumProperty, IntProperty, StringProperty
 
 from ..core import bake, injector, migrate
 from ..props import EXPORT_ITEMS
-from .common import report_all, resolve_layer, resolve_material
-
-DAMAGE_ITEMS = [("ERROR", "Refuse", "Stop if Geometry-mode damage is present"),
-                ("EXCLUDE", "Exclude", "Bake without the cut geometry"),
-                ("APPLY", "Apply", "Apply the damage to the mesh first")]
+from .common import report_all, resolve_material
 
 
 class _Mat:
@@ -25,30 +21,6 @@ class _Mat:
         return ob, mat
 
 
-class RW_OT_flatten(_Mat, bpy.types.Operator):
-    """Merge a run of layers into one Paint layer with baked colour, roughness, metallic and height"""
-    bl_idname = "realworn.flatten"
-    bl_label = "Flatten Layers"
-    bl_options = {"REGISTER", "UNDO"}
-
-    first: IntProperty(name="From", default=-1, description="-1: the layer below the selected one")
-    last: IntProperty(name="To", default=-1, description="-1: the selected layer")
-
-    def execute(self, context):
-        ob, mat = self._resolve(context)
-        if mat is None or len(mat.realworn.layers) < 1:
-            return {"CANCELLED"}
-        last = self.last if self.last >= 0 else resolve_layer(mat)
-        first = self.first if self.first >= 0 else max(0, last - 1)
-        try:
-            ly = bake.flatten(ob, mat, first, last, context.scene)
-        except (bake.BakeError, RuntimeError) as ex:
-            self.report({"ERROR"}, str(ex))
-            return {"CANCELLED"}
-        self.report({"INFO"}, "Flattened into {}".format(ly.name))
-        return {"FINISHED"}
-
-
 class RW_OT_bake(_Mat, bpy.types.Operator):
     """Bake the whole layer stack to PBR textures on RW_Paint and use them (Restore Live Stack goes back)"""
     bl_idname = "realworn.bake"
@@ -56,7 +28,6 @@ class RW_OT_bake(_Mat, bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     resolution: IntProperty(name="Resolution", default=0, description="0: the panel setting")
-    geometry_damage: EnumProperty(name="Geometry Damage", items=DAMAGE_ITEMS, default="EXCLUDE")
 
     def execute(self, context):
         ob, mat = self._resolve(context)
@@ -65,7 +36,7 @@ class RW_OT_bake(_Mat, bpy.types.Operator):
         p = context.scene.realworn
         res = self.resolution or int(p.bake_resolution)
         try:
-            imgs = bake.bake_material(ob, mat, context.scene, res, p.bake_folder, geometry_damage=self.geometry_damage)
+            imgs = bake.bake_material(ob, mat, context.scene, res, p.bake_folder)
         except (bake.BakeError, RuntimeError) as ex:
             self.report({"ERROR"}, str(ex))
             return {"CANCELLED"}
@@ -129,7 +100,7 @@ class RW_OT_migrate_v07(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_flatten, RW_OT_bake, RW_OT_restore_live, RW_OT_export_textures, RW_OT_migrate_v07)
+_classes = (RW_OT_bake, RW_OT_restore_live, RW_OT_export_textures, RW_OT_migrate_v07)
 
 
 def register():

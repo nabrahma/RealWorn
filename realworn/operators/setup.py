@@ -4,25 +4,35 @@ layer ids, so tests and scripts drive them without mouse context."""
 import bpy
 from bpy.props import BoolProperty, EnumProperty, IntProperty, StringProperty
 
-from ..core import injector, layers, setup
-from ..props import TYPE_ITEMS
+from ..core import injector, kinds, layers, setup
+from ..props import KIND_ITEMS, UV_ITEMS
 from .common import OBJECTS_DESC, report_all, resolve_layer, resolve_material, target_objects
 
 
 class RW_OT_setup(bpy.types.Operator):
-    """Wrap the material as the Base layer, add the RW_Paint UV map and make the material unique
-    to this object. Nothing about the look changes until you add and paint a layer"""
+    """Wrap the material as the Base, add the RW_Paint UV map (Cube Projection and Pack Islands) and
+    make the material unique to this object. Nothing about the look changes until you add a layer"""
     bl_idname = "realworn.setup"
     bl_label = "Setup"
     bl_options = {"REGISTER", "UNDO"}
 
     objects: StringProperty(name="Objects", description=OBJECTS_DESC, default="")
-    use_existing_uv: BoolProperty(name="Use Existing UV", default=False,
-                                  description="Copy the object's UV map into RW_Paint (clean 0 to 1 layouts)")
+    uv_method: EnumProperty(name="Paint UV", items=UV_ITEMS, default="CUBE")
+    apply_scale: BoolProperty(name="Apply Scale", default=True,
+                              description="Object coordinates follow the object's scale: apply it so box-mapped "
+                                          "textures do not stretch")
 
     def invoke(self, context, event):
-        self.use_existing_uv = context.scene.realworn.use_existing_uv
+        self.uv_method = context.scene.realworn.uv_method
+        if any(setup.needs_scale_apply(o) for o in target_objects(context, self.objects)):
+            return context.window_manager.invoke_props_dialog(self, width=360)  # SET-5
         return self.execute(context)
+
+    def draw(self, context):
+        col = self.layout.column()
+        col.label(text="Scale is not applied: box-mapped textures would stretch.", icon="ERROR")
+        col.prop(self, "apply_scale")
+        col.prop(self, "uv_method")
 
     def execute(self, context):
         obs = target_objects(context, self.objects)
@@ -30,12 +40,17 @@ class RW_OT_setup(bpy.types.Operator):
             self.report({"WARNING"}, "Select a mesh object")
             return {"CANCELLED"}
         reps = []
-        for o in obs:
+        for o in obs:  # SET-7: each object gets its own paint images
+            if self.apply_scale and setup.needs_scale_apply(o):
+                if setup.apply_scale(o):
+                    reps.append(("INFO", "{}: scale applied".format(o.name)))
+                else:
+                    reps.append(("WARNING", "{}: scale not applied (the mesh is shared)".format(o.name)))
             try:
-                reps += setup.setup_object(o, self.use_existing_uv)
+                reps += setup.setup_object(o, self.uv_method)
             except setup.SetupError as ex:
                 reps.append(("WARNING", str(ex)))
-        report_all(self, reps)
+        report_all(self, [r for r in reps if r[0] != "INFO"])
         self.report({"INFO"}, "Set up {} object(s)".format(len(obs)))
         return {"FINISHED"}
 
@@ -50,7 +65,7 @@ class RW_OT_remove(bpy.types.Operator):
     delete_masks: BoolProperty(name="Delete Painted Masks", default=True,
                                description="Painted masks are your work; export them first if you may want them")
     export_folder: StringProperty(name="Export Masks To", subtype="DIR_PATH", default="",
-                                  description="Write every mask and content image as PNG here before removing")
+                                  description="Write every painted image as PNG here before removing")
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=420)
@@ -76,29 +91,69 @@ class RW_OT_remove(bpy.types.Operator):
 
 
 class RW_OT_layer_add(bpy.types.Operator):
-    """Add a layer above the selected one. It starts with an empty mask: nothing shows until you paint"""
+    """Add a layer of this kind at its usual place in the stack and select it"""
     bl_idname = "realworn.layer_add"
     bl_label = "Add Layer"
     bl_options = {"REGISTER", "UNDO"}
 
-    type: EnumProperty(name="Type", items=TYPE_ITEMS, default="DIRT")
+    kind: EnumProperty(name="Kind", items=KIND_ITEMS, default="PAINT")
+    preset: StringProperty(name="Preset", default="", description="Washed Out, Dark Patches, Dirt Patches, "
+                                                                   "Second Material; Damage, Scratches; Graffiti, Grime")
     object: StringProperty(name="Object", default="")
     material: StringProperty(name="Material", default="")
+
+    @classmethod
+    def description(cls, context, props):
+        return "Add a {} layer".format(kinds.label(props.kind)) + (
+            " ({})".format(props.preset.replace("_", " ").title()) if props.preset else "")
 
     def execute(self, context):
         ob, mat = resolve_material(context, self.object, self.material)
         if ob is not None and not setup.is_setup(ob):
-            report_all(self, setup.setup_object(ob))
+            report_all(self, setup.setup_object(ob, context.scene.realworn.uv_method))
             ob, mat = resolve_material(context, self.object, self.material)
         if mat is None or not injector.is_setup(mat):
             self.report({"WARNING"}, "No material set up for layers (click Setup)")
             return {"CANCELLED"}
-        if self.type == "DECAL":
-            self.report({"INFO"}, "Use Place Decal to add a decal layer")
-            return {"CANCELLED"}
-        ly = layers.add_layer(mat, self.type)
+        ly = layers.add_layer(mat, self.kind, self.preset or None)
+        alpha = kinds.defaults(self.kind, self.preset or None).get("alpha")
+        if alpha:  # REV-4: the Scratches preset switches the Damage brush to a scratch alpha
+            from ..core import grunge
+            grunge.set_damage_alpha(alpha)
         self.report({"INFO"}, "Added {} to {}".format(ly.name, mat.name))
         return {"FINISHED"}
+
+
+class RW_MT_add_variation(bpy.types.Menu):
+    """UI-1: Variation presets"""
+    bl_idname = "RW_MT_add_variation"
+    bl_label = "Add Variation"
+
+    def draw(self, context):
+        for key, name in kinds.preset_items("VARIATION"):
+            op = self.layout.operator("realworn.layer_add", text=name)
+            op.kind, op.preset = "VARIATION", key
+
+
+class RW_MT_add_reveal(bpy.types.Menu):
+    """UI-1: Reveal presets"""
+    bl_idname = "RW_MT_add_reveal"
+    bl_label = "Add Reveal"
+
+    def draw(self, context):
+        for key, name in kinds.preset_items("REVEAL"):
+            op = self.layout.operator("realworn.layer_add", text=name)
+            op.kind, op.preset = "REVEAL", key
+
+
+class RW_MT_add_decals(bpy.types.Menu):
+    bl_idname = "RW_MT_add_decals"
+    bl_label = "Add Decals"
+
+    def draw(self, context):
+        for key, name in kinds.preset_items("DECALS"):
+            op = self.layout.operator("realworn.layer_add", text=name)
+            op.kind, op.preset = "DECALS", key
 
 
 class _LayerOp:
@@ -114,7 +169,7 @@ class _LayerOp:
 
 
 class RW_OT_layer_remove(_LayerOp, bpy.types.Operator):
-    """Delete the selected layer (and its painted mask)"""
+    """Delete the selected layer (and its painted image)"""
     bl_idname = "realworn.layer_remove"
     bl_label = "Delete Layer"
     bl_options = {"REGISTER", "UNDO"}
@@ -144,7 +199,7 @@ class RW_OT_layer_move(_LayerOp, bpy.types.Operator):
 
 
 class RW_OT_layer_duplicate(_LayerOp, bpy.types.Operator):
-    """Duplicate the selected layer, including a copy of its painted mask"""
+    """Duplicate the selected layer, including a copy of its painted image"""
     bl_idname = "realworn.layer_duplicate"
     bl_label = "Duplicate Layer"
     bl_options = {"REGISTER", "UNDO"}
@@ -158,22 +213,30 @@ class RW_OT_layer_duplicate(_LayerOp, bpy.types.Operator):
 
 
 class RW_OT_layer_select(_LayerOp, bpy.types.Operator):
-    """Select a layer by index (used by the panel and by tests)"""
+    """Select a layer (or the Base, index -1)"""
     bl_idname = "realworn.layer_select"
     bl_label = "Select Layer"
 
-    index: IntProperty(name="Index", default=0, min=0)
+    index: IntProperty(name="Index", default=0, min=-1)
 
     def execute(self, context):
-        mat, _ = self._target(context)
-        if mat is None:
+        ob, mat = resolve_material(context, self.object, self.material)
+        if mat is None or not injector.is_setup(mat):
             return {"CANCELLED"}
-        mat.realworn.active_layer_index = min(self.index, len(mat.realworn.layers) - 1)
+        st = mat.realworn
+        if self.index < 0:
+            st.base_active = True
+            if st.mask_view:
+                from ..core import compiler
+                compiler.compile(mat)
+            return {"FINISHED"}
+        st.base_active = False
+        st.active_layer_index = min(self.index, len(st.layers) - 1)
         return {"FINISHED"}
 
 
-_classes = (RW_OT_setup, RW_OT_remove, RW_OT_layer_add, RW_OT_layer_remove, RW_OT_layer_move,
-            RW_OT_layer_duplicate, RW_OT_layer_select)
+_classes = (RW_OT_setup, RW_OT_remove, RW_OT_layer_add, RW_MT_add_variation, RW_MT_add_reveal, RW_MT_add_decals,
+            RW_OT_layer_remove, RW_OT_layer_move, RW_OT_layer_duplicate, RW_OT_layer_select)
 
 
 def register():

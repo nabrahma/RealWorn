@@ -4,13 +4,15 @@ v0.7 weathered materials still carry their snapshot (same format) under the same
 (applied, snapshot, schema_version 1), so the original tree is restored exactly. Everything else
 v0.7 left is removed too: its RW_Masks / RW_Damage modifiers, the rw_paint colour attribute,
 object and scene rw_* custom properties, v0.7 decal Empties and node groups. Afterwards the
-objects are clean and can be Set Up for v2 painting.
+objects are clean and can be Set Up for painting.
 """
 
 import bpy
 
 from . import naming, nodeutil, snapshot
 
+V07_MODIFIERS = ("RW_Masks", "RW_Damage")
+V07_INNER_PREFIX = "RW_Inner_"
 V07_GROUPS = ("RW_Stack", "RW_Breakup", "RW_ShadingMasks", "RW_L_EdgeWear", "RW_L_Rust", "RW_L_DecalApply",
               "RW_L_CavityDirt", "RW_L_Grime", "RW_L_Dust", "RW_L_Wetness", "RW_L_WetnessDry", "RW_L_WetnessRain",
               "RW_L_Decal", "RW_BevelEdge", "RW_RayCavity")
@@ -23,10 +25,10 @@ def is_v07_material(mat):
     st = getattr(mat, "realworn", None)
     if st is None or mat.node_tree is None or not st.applied:
         return False
-    if st.schema_version >= naming.SCHEMA and st.stack is not None:
-        return False
+    if st.schema_version >= 2 and st.stack is not None:
+        return False  # a v2.x or v3 stack
     return any(n.bl_idname == "ShaderNodeGroup" and n.node_tree is not None and n.node_tree.name == "RW_Stack"
-               for n in mat.node_tree.nodes) or st.schema_version < naming.SCHEMA
+               for n in mat.node_tree.nodes) or st.schema_version < 2
 
 
 def find_v07():
@@ -61,7 +63,7 @@ def remove_v07():
             if k in st:
                 del st[k]
     for o in found["objects"]:
-        for mod in [md for md in o.modifiers if md.name in (naming.MOD_MASKS, naming.MOD_DAMAGE)]:
+        for mod in [md for md in o.modifiers if md.name in V07_MODIFIERS]:
             o.modifiers.remove(mod)
         me = o.data
         if "rw_paint" in me.color_attributes and me.get("rw_created_paint", True):
@@ -81,7 +83,7 @@ def remove_v07():
         g = bpy.data.node_groups.get(name)
         if g is not None and g.users == 0:
             bpy.data.node_groups.remove(g)
-    for m in [m for m in bpy.data.materials if m.name.startswith(naming.INNER_PREFIX) and m.users == 0]:
+    for m in [m for m in bpy.data.materials if m.name.startswith(V07_INNER_PREFIX) and m.users == 0]:
         bpy.data.materials.remove(m)
     rep.append(("INFO", "Removed v0.7 weathering from {} material(s) and {} object(s)".format(
         len(found["materials"]), len(found["objects"]))))
@@ -89,5 +91,5 @@ def remove_v07():
 
 
 def _v2_decal(empty):
-    return any(ly.type == "DECAL" and ly.decal.empty == empty for m in bpy.data.materials
-               if m.realworn.applied for ly in m.realworn.layers)
+    """A v2.x decal projector (handled by the v2 conversion, not by the v0.7 cleanup)."""
+    return bool(empty.get("rw_v2_decal"))

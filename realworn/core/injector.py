@@ -1,15 +1,21 @@
-"""Material injector (SET-2, SET-5, SET-6, REM-1): wrap a material's base and restore it exactly.
+"""Material injector (SET-1, SET-4, SET-6, G6): wrap a material's base and restore it exactly.
 
 Only this module touches a material's top-level node tree (the compiler owns the inside of
 RW_Stack::<material>).
 
 Setup: snapshot the tree; find the Principled BSDF(s) feeding the active output (through Mix /
 Add Shader, reroutes and groups, which are never edited); per Principled insert one group node
-RW::stack.<i> instancing RW_Stack::<material> between the captured channels and the Principled
-inputs. Height is captured from a Displacement node, a Bump node, or an image named height /
-disp / displacement. Materials without a Principled BSDF get a Principled overlay mixed in by the
-stack's Coverage output (SHADER mode). Remove deletes every owned node and restores links,
-defaults and layout from the snapshot, then checks the tree equals it.
+RW::stack.<i> instancing RW_Stack::<material> between the captured channels (Base Color,
+Roughness, Metallic, Normal) and the Principled inputs. Materials without a Principled BSDF get a
+Principled overlay mixed in by the stack's Coverage output (SHADER mode).
+
+Height (SET-4): the stack's one shared height (metres) feeds an owned Displacement node (Midlevel
+0, Scale 1) on the Material Output, the tutorial's Displacement node with the material on Bump.
+It is added to the material's own displacement, or replaces it once a texture set is loaded onto
+the Base (the set is then the base look).
+
+Remove deletes every owned node and restores links, defaults and layout from the snapshot, then
+checks the tree equals it.
 """
 
 import json
@@ -20,7 +26,6 @@ from . import naming, nodeutil, snapshot
 
 STACK_ROLE = "stack"
 _PASS_THROUGH = {"ShaderNodeMixShader", "ShaderNodeAddShader", "NodeReroute", "ShaderNodeGroup"}
-_HEIGHT_WORDS = ("height", "disp", "displacement")
 
 
 class InjectError(Exception):
@@ -85,28 +90,6 @@ def _abs(node):
     return loc.x, loc.y
 
 
-def height_source(tree, principled, out):
-    """SET-5: Displacement node height, else a Bump node's height, else an image named like a
-    height map, else None (the stack then uses 0.5, i.e. flat)."""
-    disp = nodeutil.link_source(out.inputs["Displacement"])
-    if disp is not None and disp.node.bl_idname == "ShaderNodeDisplacement":
-        h = nodeutil.link_source(disp.node.inputs["Height"])
-        if h is not None:
-            return h
-    if principled is not None:
-        n = nodeutil.link_source(principled.inputs["Normal"])
-        if n is not None and n.node.bl_idname == "ShaderNodeBump":
-            h = nodeutil.link_source(n.node.inputs["Height"])
-            if h is not None:
-                return h
-    for n in tree.nodes:
-        if n.bl_idname == "ShaderNodeTexImage" and n.image is not None and not nodeutil.is_owned(n):
-            stem = n.image.name.lower()
-            if any(w in stem for w in _HEIGHT_WORDS):
-                return n.outputs["Color"]
-    return None
-
-
 def _new_stack(tree, mat, idx, frame, x, y):
     stack = nodeutil.new(tree, "ShaderNodeGroup", "{}.{}".format(STACK_ROLE, idx), frame=frame)
     stack.node_tree = mat.realworn.stack
@@ -119,11 +102,10 @@ def _new_stack(tree, mat, idx, frame, x, y):
     return stack, geom
 
 
-def _inject_channel(tree, mat, principled, idx, frame, out):
+def _inject_channel(tree, mat, principled, idx, frame):
     px, py = _abs(principled)
     stack, geom = _new_stack(tree, mat, idx, frame, px - 320, py)
     stack["rw_principled"] = principled.name  # Bake swaps and Restore Live Stack relink by this
-    hs = height_source(tree, principled, out)  # before the Normal input is relinked to the stack
     for ch in naming.CHANNELS:
         pin, sin = principled.inputs[ch], stack.inputs[ch]
         src = nodeutil.link_source(pin)
@@ -134,8 +116,6 @@ def _inject_channel(tree, mat, principled, idx, frame, out):
         else:
             sin.default_value = pin.default_value
         tree.links.new(stack.outputs[ch], pin)
-    if hs is not None:
-        tree.links.new(hs, stack.inputs["Height"])
     return stack
 
 
@@ -181,12 +161,13 @@ def inject(mat):
     st = mat.realworn
     st.snapshot = snapshot.dumps(snap)
     st.schema_version = naming.SCHEMA
+    mat["rw_orig_disp"] = json.dumps(_disp_ref(tree, out))
     try:
         compiler.ensure_group(mat)
         frame = nodeutil.ensure_frame(tree)
         if princ:
             for i, p in enumerate(princ):
-                _inject_channel(tree, mat, p, i, frame, out)
+                _inject_channel(tree, mat, p, i, frame)
             st.mode = "CHANNEL"
         else:
             _inject_shader(tree, mat, out, frame)
@@ -211,6 +192,7 @@ def _drop_group(mat):
 
 def restore(mat):
     """Remove every RealWorn node and restore the original tree. Returns remaining diffs."""
+    from . import reveal
     if not is_setup(mat):
         return []
     set_mask_view(mat, False)
@@ -222,66 +204,79 @@ def restore(mat):
         st.snapshot = ""
         st.mode = ""
         st.baked = False
-        st.v21, st.base_height_kind, st.base_height_image = False, "", ""
+        if "rw_orig_disp" in mat:
+            del mat["rw_orig_disp"]
         _drop_group(mat)
-        if mat.get("rw_disp_method") is not None:
-            mat.displacement_method = mat["rw_disp_method"]
-            del mat["rw_disp_method"]
+        reveal.restore(mat)
     return diffs  # on mismatch the snapshot is kept for a retry
 
 
 # ------------------------------------------------- outputs outside the stack
+def _disp_ref(tree, out):
+    src = nodeutil.link_source(out.inputs["Displacement"]) if out is not None else None
+    return nodeutil.socket_ref(src) if src is not None else None
+
+
 def sync_outputs(mat):
-    """Displacement-mode damage: stack Displacement (mm) -> owned Displacement node -> output
-    (added to the user's own displacement if there is one). Removed when unused."""
+    """SET-4: stack Displacement (metres) -> owned Displacement node -> Material Output; added to
+    the material's own displacement, or replacing it when a texture set is loaded onto the Base.
+    Removed (and the original link restored) when nothing in the stack has height."""
+    from . import compiler
     tree = mat.node_tree
     g = mat.realworn.stack
-    if tree is None or g is None or not mat.realworn.applied:
+    if tree is None or g is None or not mat.realworn.applied or mat.realworn.baked:
         return
-    used = any(ly.visible and ly.type == "DAMAGE" and ly.damage.depth_mode == "DISPLACEMENT"
-               for ly in mat.realworn.layers)
     out = nodeutil.output_node(tree)
-    disp = nodeutil.find(tree, "disp")
     st = stacks(tree)
-    if not used or not st or out is None:
-        if disp is not None:
-            add = nodeutil.find(tree, "disp_add")
-            orig = None
-            if add is not None:
-                orig = nodeutil.link_source(add.inputs[0])
-                tree.nodes.remove(add)
-            tree.nodes.remove(disp)
-            if orig is not None:
-                tree.links.new(orig, out.inputs["Displacement"])
-            if mat.get("rw_disp_method") is not None:
-                mat.displacement_method = mat["rw_disp_method"]
-                del mat["rw_disp_method"]
+    used = bool(st) and out is not None and compiler.has_height(mat)
+    replace = mat.realworn.base.loaded()
+    orig = nodeutil.resolve(tree, json.loads(mat.get("rw_orig_disp", "null")))
+    disp, add = nodeutil.find(tree, "disp"), nodeutil.find(tree, "disp_add")
+    want_add = used and orig is not None and not replace
+    if not used:
+        for n in (add, disp):
+            if n is not None:
+                tree.nodes.remove(n)
+        if out is not None and orig is not None and not out.inputs["Displacement"].is_linked:
+            tree.links.new(orig, out.inputs["Displacement"])
         return
+    frame = nodeutil.ensure_frame(tree)
+    x, y = _abs(out)
     if disp is None:
-        frame = nodeutil.ensure_frame(tree)
         disp = nodeutil.new(tree, "ShaderNodeDisplacement", "disp", frame=frame)
-        disp.inputs["Scale"].default_value = 0.001  # stack heights are millimetres
+        disp.inputs["Scale"].default_value = 1.0  # the stack's height is in metres
         disp.inputs["Midlevel"].default_value = 0.0
-        x, y = _abs(out)
         _place(disp, x - 220, y - 300)
-        orig = nodeutil.link_source(out.inputs["Displacement"])
-        if orig is not None:
+    tree.links.new(st[0].outputs["Displacement"], disp.inputs["Height"])
+    if want_add:
+        if add is None:
             add = nodeutil.new(tree, "ShaderNodeVectorMath", "disp_add", frame=frame)
             add.operation = "ADD"
             _place(add, x - 60, y - 300)
-            tree.links.new(orig, add.inputs[0])
-            tree.links.new(disp.outputs[0], add.inputs[1])
-            tree.links.new(add.outputs[0], out.inputs["Displacement"])
-        else:
-            tree.links.new(disp.outputs[0], out.inputs["Displacement"])
-        if mat.get("rw_disp_method") is None:
-            mat["rw_disp_method"] = mat.displacement_method
-        mat.displacement_method = "BOTH"
-    tree.links.new(st[0].outputs["Displacement"], disp.inputs["Height"])
+        tree.links.new(orig, add.inputs[0])
+        tree.links.new(disp.outputs[0], add.inputs[1])
+        tree.links.new(add.outputs[0], out.inputs["Displacement"])
+    else:
+        if add is not None:
+            tree.nodes.remove(add)
+        tree.links.new(disp.outputs[0], out.inputs["Displacement"])
+
+
+def unlink_displacement(mat):
+    """Bake: the baked normal map carries the relief, so the live height is unplugged."""
+    tree = mat.node_tree
+    out = nodeutil.output_node(tree)
+    for role in ("disp_add", "disp"):
+        n = nodeutil.find(tree, role)
+        if n is not None:
+            tree.nodes.remove(n)
+    orig = nodeutil.resolve(tree, json.loads(mat.get("rw_orig_disp", "null")))
+    if out is not None and orig is not None and not mat.realworn.base.loaded():
+        tree.links.new(orig, out.inputs["Displacement"])
 
 
 def set_mask_view(mat, state):
-    """PNT-8: route the stack's Mask View output to the surface as greyscale emission."""
+    """MSK-4: route the stack's Mask View output to the surface as greyscale emission."""
     tree = mat.node_tree
     if tree is None:
         return False
@@ -297,8 +292,7 @@ def set_mask_view(mat, state):
             emis = nodeutil.new(tree, "ShaderNodeEmission", "maskview", frame=nodeutil.ensure_frame(tree))
             x, y = _abs(out)
             _place(emis, x, y + 200)
-        tree.links.new(st[0].outputs["Layer Color" if mat.realworn.view_channel == "COLOR" else "Mask View"],
-                       emis.inputs["Color"])
+        tree.links.new(st[0].outputs["Mask View"], emis.inputs["Color"])
         tree.links.new(emis.outputs[0], out.inputs["Surface"])
         return True
     if emis is None:

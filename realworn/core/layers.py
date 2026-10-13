@@ -1,15 +1,17 @@
-"""Layer list editing (add, remove, move, duplicate) and reference validation.
+"""Layer list editing (add, remove, move, duplicate).
 
-Every edit happens inside compiler.batch() and ends with exactly one compile(). Layer order
-equals stack order: index 0 is directly above Base.
+Every edit happens inside compiler.batch() and ends with exactly one compile(). Layer order is
+stack order: index 0 sits directly on the Base. A new layer drops into its kind's usual place
+(UI-1, kinds.ORDER); the user can drag it anywhere.
 """
 
+import random
 import uuid
 
 import bpy
 
-from . import compiler, naming
-from . import layer_types as LT
+from . import compiler
+from . import kinds as K
 
 
 def new_id():
@@ -26,60 +28,50 @@ def _unique_name(mat, base):
     return "{} {}".format(base, i)
 
 
-def _suggested_grunge(kind):
-    """Tinted Grunge default image: the type's suggestion (Rust: rust spots), if the library has it."""
+def _grunge(name):
     from . import grunge
-    sug = LT.TYPES[kind].get("suggest", "")
-    name = sug.split(":", 1)[1] if sug.startswith("GRUNGE:") else "grime_clouds"
     try:
-        return grunge.load(name)
+        return grunge.load("grunges", name)
     except KeyError:
         return None
 
 
-def apply_defaults(layer, kind):
-    d = LT.defaults(kind)
-    layer.type = kind
-    for ch in LT.CHANNEL_NAMES:
-        c = getattr(layer, ch)
-        dc = d[ch]
-        c.enabled = dc["enabled"]
-        c.source = dc["source"]
-        c.blend = dc["blend"]
-        if ch == "color":
-            c.color = dc["value"]
-            if dc["source"] == "TINTED_GRUNGE" and c.grunge is None:
-                c.grunge = _suggested_grunge(kind)
-        else:
-            c.value = dc["value"]
-    for k in ("use_height_blend", "height_blend", "lock_source", "lock_strength", "threshold", "softness"):
-        setattr(layer, k, d[k])
-    if kind == "DAMAGE":
-        from . import damage
-        damage.set_inner(layer)
-    from . import detail
-    if detail.wants_defaults(layer.id_data):  # v2.1 materials: per-type Edge Detail (EDG-9)
-        detail.apply_defaults(layer, kind)
+def apply_defaults(layer, kind, preset=None, variation_index=0):
+    """The kind's defaults (and a preset's) on a fresh layer."""
+    from . import grunge
+    d = K.defaults(kind, preset)
+    layer.kind = kind
+    gname = d.pop("breakup", None)
+    if kind == "VARIATION":  # VAR-3: each new Variation gets another grunge and a random offset
+        gname = K.VARIATION_GRUNGES[variation_index % len(K.VARIATION_GRUNGES)]
+        layer.breakup_offset = round(random.Random(layer.id).uniform(0.0, 10.0), 3)
+    d.pop("alpha", None)
+    for key, value in d.items():
+        setattr(layer, key, value)
+    if gname:
+        layer.breakup_grunge = _grunge(gname)
+        layer.breakup_scale = grunge.suggested_scale(gname, 0.5)
 
 
-def add_layer(mat, kind="CUSTOM", name=None, index=None):
-    """Add a layer above the active one (or at `index`); returns it. Nothing shows until painted:
-    the mask starts empty and every ingredient amount is 0 (PRD core workflow step 3)."""
+def add_layer(mat, kind="PAINT", preset=None, name=None, index=None):
+    """Add a layer of `kind` (with an optional preset) at its default stack position, or at
+    `index`, select it and return it. Painted kinds show nothing until painted."""
     st = mat.realworn
+    variations = sum(1 for ly in st.layers if ly.kind == "VARIATION")
     with compiler.batch(mat):
         ly = st.layers.add()
         ly.id = new_id()
-        ly.name = _unique_name(mat, name or LT.TYPES[kind]["label"])
-        apply_defaults(ly, kind)
-        if kind == "DECAL":
-            ly.threshold, ly.softness = 0.5, 1.0
+        label = next((n for k, n in K.preset_items(kind) if k == preset), None) if preset else None
+        ly.name = _unique_name(mat, name or label or K.label(kind))
+        apply_defaults(ly, kind, preset, variations)
         last = len(st.layers) - 1
         if index is None:
-            index = st.active_layer_index + 1 if len(st.layers) > 1 else 0
+            index = K.insert_index([x.kind for x in list(st.layers)[:last]], kind)
         index = max(0, min(index, last))
         if index != last:
             st.layers.move(last, index)
         st.active_layer_index = index
+        st.base_active = False
     compiler.compile(mat)
     return st.layers[index]
 
@@ -91,17 +83,16 @@ def index_of(mat, layer_id):
     raise KeyError(layer_id)
 
 
+def _owned_images(ly):
+    return [i for i in (ly.mask_image, ly.baked_image) if i is not None]
+
+
 def remove_layer(mat, index, delete_images=True):
     st = mat.realworn
     ly = st.layers[index]
-    lid = ly.id
-    imgs = [i for i in (ly.mask_image, ly.content_image) if i is not None] if delete_images else []
+    imgs = _owned_images(ly) if delete_images else []
     with compiler.batch(mat):
         st.layers.remove(index)
-        for other in st.layers:  # references to the deleted layer become empty
-            for ing in other.ingredients:
-                if ing.kind == "REFERENCE" and ing.ref_layer_id == lid:
-                    ing.ref_layer_id = ""
         st.active_layer_index = max(0, min(st.active_layer_index, len(st.layers) - 1))
     compiler.compile(mat)
     for img in imgs:
@@ -118,31 +109,8 @@ def move_layer(mat, index, direction):
     with compiler.batch(mat):
         st.layers.move(index, new)
         st.active_layer_index = new
-        fix_references(mat)
     compiler.compile(mat)
     return new
-
-
-def fix_references(mat):
-    """ING-5: a layer may only reference layers below it; references pointing up are cleared."""
-    below = set()
-    cleared = 0
-    for ly in mat.realworn.layers:
-        for ing in ly.ingredients:
-            if ing.kind == "REFERENCE" and ing.ref_layer_id and ing.ref_layer_id not in below:
-                ing.ref_layer_id = ""
-                cleared += 1
-        below.add(ly.id)
-    return cleared
-
-
-def layers_below(mat, layer):
-    out = []
-    for ly in mat.realworn.layers:
-        if ly == layer or ly.id == layer.id:
-            break
-        out.append(ly)
-    return out
 
 
 def copy_props(src, dst, skip=("id", "name")):
@@ -167,22 +135,22 @@ def copy_props(src, dst, skip=("id", "name")):
 
 
 def duplicate_layer(mat, index):
+    from . import naming
     st = mat.realworn
     with compiler.batch(mat):
         ly = st.layers.add()
-        # add() can reallocate the collection: a reference taken before it may point at freed
-        # memory (seen as an endless loop over its ingredients), so look the source up again
+        # add() can reallocate the collection: look the source up again after it
         src = st.layers[index]
         copy_props(src, ly)
         ly.id = new_id()
         ly.name = _unique_name(mat, src.name)
-        for attr in ("mask_image", "content_image"):
+        for attr in ("mask_image", "baked_image"):
             img = getattr(src, attr)
             if img is not None:
                 dup = img.copy()
                 dup.name = img.name + ".dup"
-                dup[naming.IMG_MASK if attr == "mask_image" else naming.IMG_CONTENT] = "{}/{}".format(
-                    st.owner, ly.id)
+                tag = naming.IMG_MASK if attr == "mask_image" else naming.IMG_BAKED_SOURCE
+                dup[tag] = "{}/{}".format(st.owner, ly.id)
                 if img.packed_file is not None or img.is_dirty or not img.filepath:
                     try:
                         dup.pack()
@@ -194,3 +162,16 @@ def duplicate_layer(mat, index):
         st.active_layer_index = index + 1
     compiler.compile(mat)
     return st.layers[index + 1]
+
+
+def load_texture(mat, paths, layer=None, scale=None):
+    """Load Texture (LT-1, LT-5) into a layer, or into the Base when `layer` is None. Loading over a
+    set replaces its maps and keeps every other setting and the paint. Returns the channels found."""
+    from . import pbrset
+    ts = layer.texture if layer is not None else mat.realworn.base
+    with compiler.batch(mat):
+        done = pbrset.assign(ts, paths, scale)
+        if layer is not None and done and layer.kind != "DECALS":
+            layer.content = "TEXTURE"
+    compiler.compile(mat)
+    return done

@@ -1,15 +1,18 @@
-"""One-click Setup and Remove per object (SET-1..SET-7, REM-1, REM-2).
+"""One-click Setup and Remove per object (SET-1..SET-7, G6).
 
-Setup: validate the mesh; give empty slots a default Principled material; make materials used
-by other objects unique to this object (<name>.RW); add the RW_Paint UV map (Smart UV Project,
-or a copy of the existing UV) without touching the user's UV maps; wrap every material
-(injector.inject) with an empty, invisible stack.
+Setup: validate the mesh; give an object without a material RW_<object> (a neutral grey Base);
+make materials used by other objects unique to this object (<name>.RW); add the RW_Paint UV map
+the tutorial's way (Cube Projection, then Pack Islands; Smart UV or a copy of the existing UV as
+options) without touching the user's UV maps; wrap every material (injector.inject) with an empty,
+invisible stack. Unapplied object scale is reported (SET-5): the operator offers to apply it,
+since Object texture coordinates follow the object's scale.
 
 Remove restores each slot's original material (deleting the .RW copies and default materials
 RealWorn made), the original node trees, the UV state and the slot links, and deletes RW_Paint,
-the stack groups and RealWorn modifiers. Painted masks are deleted only when asked (REM-2).
+the stack groups and RealWorn modifiers. Painted images are deleted only when asked.
 
-Everything Setup changes on the object is recorded in obj["rw_setup"] (JSON).
+Everything Setup changes on the object is recorded in obj["rw_setup"] (JSON). Applying scale is
+a separate, confirmed user action and is not undone by Remove.
 """
 
 import json
@@ -17,8 +20,11 @@ import math
 
 import bpy
 
-from . import ctx, injector, masks, naming
-from . import layer_types as LT
+from . import ctx, injector, naming
+
+CUBE_SIZE = 1.0       # SET-2: Cube Projection (the tutorial's settings)
+PACK_MARGIN = 0.004   # Pack Islands margin (about 8 px at 2048)
+SCALE_TOL = 1e-4
 
 
 class SetupError(Exception):
@@ -26,6 +32,10 @@ class SetupError(Exception):
 
 
 # ----------------------------------------------------------------- queries
+def is_supported(obj):
+    return obj is not None and obj.type == "MESH" and obj.library is None
+
+
 def materials_of(obj):
     seen = []
     for slot in obj.material_slots:
@@ -54,6 +64,22 @@ def layered_materials(obj):
     return [m for m in materials_of(obj) if injector.is_setup(m)]
 
 
+def needs_scale_apply(obj):
+    """SET-5: True when the object's scale is not (1, 1, 1)."""
+    return obj is not None and any(abs(s - 1.0) > SCALE_TOL for s in obj.scale)
+
+
+def apply_scale(obj):
+    """Apply the object's scale to its mesh (a single-user mesh only). Returns True when applied."""
+    if not needs_scale_apply(obj):
+        return False
+    if obj.data.users > 1:
+        return False
+    with bpy.context.temp_override(**ctx.override(obj)):
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    return True
+
+
 # ---------------------------------------------------------------- RW_Paint
 def _restore_uv_state(me, active, render):
     if active and active in me.uv_layers:
@@ -62,15 +88,16 @@ def _restore_uv_state(me, active, render):
         me.uv_layers[render].active_render = True
 
 
-def ensure_paint_uv(obj, use_existing=False, margin=0.02):
-    """SET-4: add RW_Paint (non-overlapping islands) without changing the user's UV maps or which
-    one renders. Returns True if created."""
+def ensure_paint_uv(obj, method="CUBE"):
+    """SET-2: add RW_Paint (non-overlapping islands) without changing the user's UV maps or which
+    one renders. CUBE: Cube Projection then Pack Islands; SMART: Smart UV Project; EXISTING: a copy
+    of the active UV map. Returns True if created."""
     me = obj.data
     if naming.UV_PAINT in me.uv_layers:
         return False
     active = me.uv_layers.active.name if me.uv_layers.active else None
     render = next((u.name for u in me.uv_layers if u.active_render), None)
-    src = me.uv_layers.active if use_existing and me.uv_layers.active else None
+    src = me.uv_layers.active if method == "EXISTING" and me.uv_layers.active else None
     uv = me.uv_layers.new(name=naming.UV_PAINT, do_init=False)
     if src is not None:
         n = len(me.loops)
@@ -78,15 +105,35 @@ def ensure_paint_uv(obj, use_existing=False, margin=0.02):
         src.data.foreach_get("uv", buf)
         uv.data.foreach_set("uv", buf)
     elif me.polygons:
-        _smart_project(obj, uv.name, margin)
+        _unwrap(obj, uv.name, method)
     _restore_uv_state(me, active, render)
-    if render is None:  # the mesh had no UV map: keep RW_Paint from becoming the render UV
-        pass
     return True
 
 
-def _smart_project(obj, uv_name, margin):
-    """Smart UV Project on one object into `uv_name`, restoring mode, selection and active."""
+def separate_projections(me, uv_name):
+    """Cube Projection gives faces that meet at an edge the same UVs along it, so Pack Islands
+    would treat two projection directions as one overlapping island. Move each direction's faces
+    (dominant normal axis and sign) apart first; Pack Islands then lays them out without overlap."""
+    import numpy as np
+    n = np.empty(len(me.polygons) * 3, np.float32)
+    me.polygons.foreach_get("normal", n)
+    n = n.reshape(-1, 3)
+    axis = np.abs(n).argmax(axis=1)
+    side = (n[np.arange(len(n)), axis] < 0).astype(np.int64)
+    group = axis * 2 + side
+    total = np.empty(len(me.polygons), np.int64)
+    me.polygons.foreach_get("loop_total", total)
+    loop_group = np.repeat(group, total)
+    uv = me.uv_layers[uv_name]
+    co = np.empty(len(me.loops) * 2, np.float32)
+    uv.data.foreach_get("uv", co)
+    co = co.reshape(-1, 2)
+    co[:, 0] += loop_group * 8.0
+    me.uv_layers[uv_name].data.foreach_set("uv", co.ravel())
+
+
+def _unwrap(obj, uv_name, method):
+    """Unwrap one object into `uv_name`, restoring mode, selection and active object."""
     me = obj.data
     vl = bpy.context.view_layer
     prev_active = vl.objects.active
@@ -108,8 +155,17 @@ def _smart_project(obj, uv_name, margin):
                 bpy.ops.object.mode_set(mode="EDIT")
             bpy.ops.mesh.reveal()
             bpy.ops.mesh.select_all(action="SELECT")
-            bpy.ops.uv.smart_project(angle_limit=math.radians(66.0), island_margin=margin,
-                                     area_weight=0.0, correct_aspect=True, scale_to_bounds=False)
+            if method == "SMART":
+                bpy.ops.uv.smart_project(angle_limit=math.radians(66.0), island_margin=PACK_MARGIN,
+                                         area_weight=0.0, correct_aspect=True, scale_to_bounds=False)
+            else:
+                bpy.ops.uv.cube_project(cube_size=CUBE_SIZE, correct_aspect=True)
+                bpy.ops.object.mode_set(mode="OBJECT")
+                separate_projections(me, uv_name)
+                bpy.ops.object.mode_set(mode="EDIT")
+                bpy.ops.mesh.select_all(action="SELECT")
+                bpy.ops.uv.select_all(action="SELECT")
+                bpy.ops.uv.pack_islands(margin=PACK_MARGIN)
             bpy.ops.object.mode_set(mode="OBJECT")
     finally:
         obj.hide_set(hidden)
@@ -151,23 +207,27 @@ def uv_overlap_ratio(obj, uv_name=naming.UV_PAINT, res=256):
                 continue
             l1 = ((b[1] - c[1]) * (px - c[0]) + (c[0] - b[0]) * (py - c[1])) / d
             l2 = ((c[1] - a[1]) * (px - c[0]) + (a[0] - c[0]) * (py - c[1])) / d
-            inside = (l1 >= 0) & (l2 >= 0) & (l1 + l2 <= 1)
+            inside = (l1 > 1e-3) & (l2 > 1e-3) & (l1 + l2 < 1 - 1e-3)
             cover[y0:y1, x0:x1] += inside
     used = (cover > 0).sum()
     return float((cover > 1).sum()) / float(used) if used else 0.0
 
 
 # ------------------------------------------------------------------ setup
-def _default_material():
-    mat = bpy.data.materials.new(naming.DEFAULT_MATERIAL)
+def _default_material(obj):
+    """SET-1: RW_<object>, a neutral grey Principled."""
+    mat = bpy.data.materials.new(naming.default_material_name(obj.name))
+    p = next((n for n in mat.node_tree.nodes if n.bl_idname == "ShaderNodeBsdfPrincipled"), None)
+    if p is not None:
+        p.inputs["Base Color"].default_value = (0.5, 0.5, 0.5, 1.0)
     mat["rw_created"] = True
     return mat
 
 
-def setup_object(obj, use_existing_uv=False):
+def setup_object(obj, uv_method="CUBE"):
     """Set the object up for painting. Returns report tuples [(level, message)]."""
     rep = []
-    if not masks.is_supported(obj):
+    if not is_supported(obj):
         raise SetupError("{}: not a local mesh object".format(obj.name if obj else None))
     if is_setup(obj):
         for m in materials_of(obj):  # a material added after Setup gets wrapped too
@@ -185,7 +245,7 @@ def setup_object(obj, use_existing_uv=False):
         orig = slot.material
         rec["slots"].append({"index": i, "material": orig.name if orig else None, "link": slot.link})
         if orig is None:
-            slot.material = _default_material()
+            slot.material = _default_material(obj)
             continue
         if orig.library is not None and orig.override_library is None:
             rep.append(("WARNING", "{}: linked from a library, skipped".format(orig.name)))
@@ -201,12 +261,15 @@ def setup_object(obj, use_existing_uv=False):
             slot.material = dup
             rep.append(("INFO", "{}: made unique to {} (was shared)".format(dup.name, obj.name)))
     obj[naming.OB_SETUP] = json.dumps(rec)
-    rec["uv_created"] = ensure_paint_uv(obj, use_existing_uv)
+    rec["uv_created"] = ensure_paint_uv(obj, uv_method)
     obj[naming.OB_SETUP] = json.dumps(rec)
-    if rec["uv_created"] and not use_existing_uv:
+    if rec["uv_created"] and uv_method != "EXISTING":
         ov = uv_overlap_ratio(obj)
         if ov > 0.02:
             rep.append(("WARNING", "{}: RW_Paint islands overlap {:.0%}".format(obj.name, ov)))
+    if needs_scale_apply(obj):
+        rep.append(("WARNING", "{}: scale is not applied; box-mapped textures follow the object's scale "
+                               "(Setup can apply it)".format(obj.name)))
     for m in materials_of(obj):
         _wrap(obj, m, rep)
     return rep
@@ -214,11 +277,7 @@ def setup_object(obj, use_existing_uv=False):
 
 def _wrap(obj, mat, rep):
     try:
-        if injector.inject(mat) == "setup":
-            from . import detail
-            mat.realworn.v21 = True  # v2.1 Setup: new layers get the per-type Edge Detail defaults
-            detail.capture_base(mat)  # SRC-2: base height normalisation
-            detail.capture_ao(mat)  # SRC-4: the base's AO map, when there is one
+        injector.inject(mat)
         mat.realworn.owner = obj.name
     except injector.InjectError as ex:
         rep.append(("WARNING", str(ex)))
@@ -229,7 +288,7 @@ def mask_images(obj):
     out = []
     for m in materials_of(obj):
         for ly in m.realworn.layers:
-            for img in (ly.mask_image, ly.content_image):
+            for img in (ly.mask_image, ly.baked_image):
                 if img is not None and img not in out:
                     out.append(img)
     return out
@@ -237,14 +296,11 @@ def mask_images(obj):
 
 def remove_object(obj, delete_images=True):
     """Undo Setup on one object. Returns report tuples."""
+    from . import reveal
     rep = []
     rec = record(obj)
-    from . import damage
-    damage.remove_geometry(obj)
-    damage.remove_subdiv(obj)
+    reveal.remove_subdiv(obj)
     images = mask_images(obj) if delete_images else []
-    empties = {ly.decal.empty for m in materials_of(obj) for ly in m.realworn.layers
-               if ly.type == "DECAL" and ly.decal.empty is not None}
     for m in materials_of(obj):
         if injector.is_setup(m):
             diffs = injector.restore(m)
@@ -254,6 +310,8 @@ def remove_object(obj, delete_images=True):
             else:
                 m.realworn.layers.clear()
                 m.realworn.owner = ""
+                from . import pbrset
+                pbrset.clear(m.realworn.base)
     for s in rec.get("slots", []):
         i = s["index"]
         if i >= len(obj.material_slots):
@@ -279,19 +337,9 @@ def remove_object(obj, delete_images=True):
         if not still:
             me.uv_layers.remove(me.uv_layers[naming.UV_PAINT])
     _restore_uv_state(me, rec.get("uv_active"), rec.get("uv_render"))
-    masks.remove_masks(obj)
-    for ly_attr in [a.name for a in me.color_attributes if a.name.startswith(naming.ATTR_VMASK)]:
-        me.color_attributes.remove(me.color_attributes[ly_attr])
     for img in images:
         if img.users == 0 or (img.users == 1 and img.use_fake_user):
             bpy.data.images.remove(img)
-    for e in empties:  # projector Empties no other layer uses any more
-        if not any(ly.type == "DECAL" and ly.decal.empty == e for m in bpy.data.materials if m.realworn.applied
-                   for ly in m.realworn.layers):
-            bpy.data.objects.remove(e)
-    coll = bpy.data.collections.get(naming.COLL_DECALS)
-    if coll is not None and not coll.objects:
-        bpy.data.collections.remove(coll)
     if naming.OB_SETUP in obj:
         del obj[naming.OB_SETUP]
     return rep
@@ -309,46 +357,3 @@ def remove_all():
     from . import assets
     assets.remove_unused_groups()
     return rep
-
-
-# -------------------------------------------------------------- generators
-def _uses_generators(mat):
-    for ly in mat.realworn.layers:
-        if not ly.visible:
-            continue
-        if ly.lock_source in LT.GENERATOR_KINDS:
-            return True
-        if any(i.kind in LT.GENERATOR_KINDS for i in ly.ingredients):
-            return True
-    return False
-
-
-def sync_generators(mat):
-    """ING-1: RW_Masks exists on an object only while one of its layers uses Edge, Cavity or
-    Contact."""
-    for obj in objects_using(mat):
-        need = any(_uses_generators(m) for m in layered_materials(obj))
-        has = masks.masks_modifier(obj) is not None
-        if need and not has:
-            masks.ensure_masks(obj)
-            sync_widths(mat)
-        elif not need and has:
-            masks.remove_masks(obj)
-
-
-def sync_widths(mat):
-    """Ingredient / lock widths drive the object's RW_Masks inputs (one value per kind)."""
-    want = {}
-    for ly in mat.realworn.layers:
-        if ly.lock_source in LT.GENERATOR_KINDS:
-            want.setdefault(ly.lock_source, ly.lock_width)
-        for ing in ly.ingredients:
-            if ing.kind in LT.GENERATOR_KINDS:
-                want[ing.kind] = ing.width
-    names = {"EDGE": "Edge Width", "CAVITY": "Cavity Width", "CONTACT": "Contact Width"}
-    for obj in objects_using(mat):
-        mod = masks.masks_modifier(obj)
-        if mod is None:
-            continue
-        for kind, w in want.items():
-            masks.set_input(mod, names[kind], w)

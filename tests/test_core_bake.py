@@ -1,6 +1,6 @@
-"""P8 acceptance: Bake Material + Restore Live Stack (BAK-2), Flatten (BAK-1), Export Textures with
-engine presets (BAK-3), Geometry damage handled explicitly (BAK-4), v0.7 files cleaned
-(migration path), and success criterion 3: 20 x Setup / paint / Remove without leftovers."""
+"""Bake and safety (kept from v2; PRD v3 UI-5, G6, success criterion 3): Bake Material + Restore
+Live Stack, Export Textures with engine presets, v0.7 files cleaned, and 20 x Setup / paint /
+Remove without leftovers."""
 
 import os
 import shutil
@@ -14,27 +14,27 @@ import pytest
 import render_util as ru
 from corpus.generated import GENERATED
 from fixtures import make_scenes as ms
-from realworn.core import bake, damage, images, layers, migrate, naming, nodeutil, setup, snapshot
-from test_p1_setup import state_of, uv_cube
+from realworn.core import bake, images, layers, migrate, naming, nodeutil, setup, snapshot
+from test_core_setup import _texture_folder, state_of, uv_cube
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def painted_cube(sc, name="Prop"):
+def painted_cube(sc, name="Prop", tmp=None):
     ob = uv_cube(sc, name, size=1.0, cuts=8, material=ms.principled(name + "Mat", (0.05, 0.2, 0.5), roughness=0.4))
     setup.setup_object(ob)
     mat = ob.material_slots[0].material
-    me = ob.data
-    uv = np.empty(len(me.loops) * 2, np.float32)
-    me.uv_layers[naming.UV_PAINT].data.foreach_get("uv", uv)
-    for kind, half in (("DIRT", 0), ("WEAR", 1), ("WATER", 2)):
+    for kind, half in (("PAINT", 0), ("REVEAL", 1), ("DIRT", 2)):
         ly = layers.add_layer(mat, kind)
         ly.mask_res = 256
-        if kind == "WEAR":
-            ly.lock_source = "NONE"
+        if kind == "PAINT":
+            ly.content, ly.color, ly.roughness = "COLOR", (0.6, 0.1, 0.05), 0.8
+        if kind == "DIRT":
+            ly.edge_source = "LIVE"
         img = images.ensure_mask(ob, mat, ly)
         px = np.zeros((256, 256, 4), np.float32)
-        px[:, half * 85:(half + 1) * 85] = 1.0  # three vertical bands of the RW_Paint layout
+        px[..., 3] = 1.0
+        px[:, half * 85:(half + 1) * 85, :3] = 1.0  # three vertical bands of the RW_Paint layout
         img.pixels.foreach_set(px.ravel())
         img.update()
     return ob, mat
@@ -45,7 +45,7 @@ def _camera(sc, res=(128, 128), samples=16):
     ru.setup(sc, samples=samples, res=res)
 
 
-# ------------------------------------------------------------- BAK-2
+# ------------------------------------------------------------- Bake Material
 def test_bake_material_swap_restore_remove(empty_scene, out_dir):
     sc = empty_scene
     ob, mat = painted_cube(sc)
@@ -53,13 +53,15 @@ def test_bake_material_swap_restore_remove(empty_scene, out_dir):
     _camera(sc)
     live = ru.render(sc, os.path.join(out_dir, "p8_live.png"))
     imgs = bake.bake_material(ob, mat, sc, resolution=256, folder=os.path.join(out_dir, "p8_bake"))
-    assert set(imgs) == {"base_color", "roughness", "metallic", "height", "coat_weight", "coat_roughness", "normal"}
+    assert set(imgs) == {"base_color", "roughness", "metallic", "height", "normal"}
     for img in imgs.values():
         assert os.path.exists(bpy.path.abspath(img.filepath_raw)), img.name
     p = mat.node_tree.nodes["Principled BSDF"]
     assert p.inputs["Base Color"].links[0].from_node.name == "RW::baked.base_color"
     assert p.inputs["Normal"].links[0].from_node.name == "RW::baked.nmap" and mat.realworn.baked
     assert mat.node_tree.nodes["RW::baked.uv"].uv_map == naming.UV_PAINT
+    out = nodeutil.output_node(mat.node_tree)
+    assert not out.inputs["Displacement"].is_linked  # the baked normal map carries the relief
     baked = ru.render(sc, os.path.join(out_dir, "p8_baked.png"))
     bake.restore_live(mat)
     restored = ru.render(sc, os.path.join(out_dir, "p8_restored.png"))
@@ -72,45 +74,7 @@ def test_bake_material_swap_restore_remove(empty_scene, out_dir):
     assert not nodeutil.owned_nodes(mat.node_tree)
 
 
-def test_bake_geometry_damage_is_explicit(empty_scene, out_dir):
-    sc = empty_scene
-    ob = ms.sharp_cube(sc, name="Block", size=1.0, cuts=8, location=(0, 0, 0.5), material=ms.principled("B"))
-    ob.data.uv_layers.new(name="UVMap")
-    setup.setup_object(ob)
-    mat = ob.material_slots[0].material
-    ly = layers.add_layer(mat, "DAMAGE")
-    images.fill(images.ensure_mask(ob, mat, ly), 1.0)
-    ly.damage.depth_mode = "GEOMETRY"
-    ly.damage.density = 30.0
-    mod = damage.damage_modifier(ob)
-    assert mod is not None
-    with pytest.raises(bake.BakeError, match="Geometry-mode damage"):
-        bake.bake_material(ob, mat, sc, resolution=32, folder=os.path.join(out_dir, "p8_dmg"))
-    bake.bake_material(ob, mat, sc, resolution=32, folder=os.path.join(out_dir, "p8_dmg"), geometry_damage="EXCLUDE")
-    assert mod.show_render and mod.show_viewport  # put back after the bake
-
-
-# ------------------------------------------------------------- BAK-1
-def test_flatten_two_layers(empty_scene, out_dir):
-    sc = empty_scene
-    ob, mat = painted_cube(sc)
-    _camera(sc)
-    for ly in mat.realworn.layers:  # flatten the two bottom ones; hide Water so only they show
-        ly.visible = ly.type != "WATER"
-    before = ru.render(sc, os.path.join(out_dir, "p8_flat_before.png"))
-    n = len(mat.realworn.layers)
-    merged = bake.flatten(ob, mat, 0, 1, sc, resolution=256)
-    assert len(mat.realworn.layers) == n - 1 and merged.type == "PAINT"
-    assert merged.content_image is not None and merged.roughness.image is not None
-    assert mat.realworn.stack.nodes[naming.layer_node(merged.id, "roughness.img")].inputs["Vector"].links[0] \
-        .from_node.uv_map == naming.UV_PAINT
-    after = ru.render(sc, os.path.join(out_dir, "p8_flat_after.png"))
-    d = ru.mad(before, after)
-    print("\n[flatten] before vs after MAD {:.4f}".format(d))
-    assert d < 0.03
-
-
-# ------------------------------------------------------------- BAK-3
+# ------------------------------------------------------------- Export
 def test_export_presets(empty_scene, out_dir):
     sc = empty_scene
     ob, mat = painted_cube(sc)
@@ -198,7 +162,7 @@ def test_v07_file_is_restored_and_set_up_again(empty_scene, out_dir):
     assert not [g for g in bpy.data.node_groups if g.name in migrate.V07_GROUPS]
     assert not migrate.find_v07()["materials"]
     ob.data.uv_layers.new(name="UVMap")
-    setup.setup_object(ob)  # v2 from here
+    setup.setup_object(ob)  # v3 from here
     assert mat.realworn.stack is not None and mat.realworn.schema_version == naming.SCHEMA
 
 
@@ -210,15 +174,16 @@ def test_twenty_setup_paint_remove_cycles(empty_scene):
     before = {o.name: state_of(o) for o in obs}
     images_before = set(bpy.data.images.keys())
     groups_before = set(bpy.data.node_groups.keys())
-    kinds = ("DIRT", "WEAR", "RUST", "WATER", "DAMAGE", "PAINT", "CUSTOM")
+    kinds = ("VARIATION", "PAINT", "REVEAL", "DECALS", "EDGE_WEAR", "DIRT")
     for cycle in range(20):
         for i, o in enumerate(obs):
             setup.setup_object(o)
             mat = o.material_slots[0].material
             for k in range(1 + (cycle + i) % 3):
                 ly = layers.add_layer(mat, kinds[(cycle + i + k) % len(kinds)])
-                ly.mask_res = 64
-                images.fill(images.ensure_mask(o, mat, ly), 1.0)
+                ly.mask_res, ly.decal_res = 64, "2048"
+                if ly.kind in ("PAINT", "REVEAL", "DIRT"):
+                    images.fill(images.ensure_mask(o, mat, ly), 1.0)
         for o in obs:
             assert setup.remove_object(o) == []
     for o in obs:

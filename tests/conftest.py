@@ -30,18 +30,3 @@ def empty_scene():
 def out_dir():
     os.makedirs(OUT, exist_ok=True)
     return OUT
-
-
-@pytest.fixture(autouse=True)
-def detail_defaults_by_suite(request):
-    """New layers get the v2.1 Edge Detail defaults only in the v2.1 suites (test_v21_*). The v2.0
-    suites keep measuring v2.0 masks, so they stay a regression check of everything v2.1 left
-    unchanged (PRD v2.1: the full v2.0 suite must stay green)."""
-    if not HAVE_BPY:
-        yield
-        return
-    from realworn.core import detail
-    saved = detail.DEFAULTS_FOR_NEW_LAYERS
-    detail.DEFAULTS_FOR_NEW_LAYERS = os.path.basename(str(request.fspath)).startswith("test_v21")
-    yield
-    detail.DEFAULTS_FOR_NEW_LAYERS = saved
