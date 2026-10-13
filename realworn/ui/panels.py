@@ -457,6 +457,20 @@ class RW_PT_sharpness(_Base, bpy.types.Panel):
         h.object = ob.name
         opx(row, "realworn.upgrade_masks", icon="IMAGE_REFERENCE").object = ob.name
         found = diagnostics.check(context.preferences.system, context.scene, setup.materials_of(ob))
+        opx(lay, "realworn.sharpness_report", icon="VIEWZOOM").object = ob.name
+        import json
+        rep = context.scene.get("rw_sharpness_report")
+        if rep:
+            try:
+                data = json.loads(rep)
+            except ValueError:
+                data = {}
+            if data.get("object") == ob.name:
+                col = lay.box().column(align=True)
+                col.label(text="Edge width at {} px".format(data.get("px", 512)))
+                for name, w, lim in data.get("rows", []):
+                    col.label(text="{}: {}".format(name, "{:.1f} px".format(w) if w else "no edge"))
+                    col.label(text="   limited by " + lim)
         if not found:
             lay.label(text="No settings limit texture resolution", icon="CHECKMARK")
         for f in found:

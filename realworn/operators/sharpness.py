@@ -117,6 +117,81 @@ class RW_OT_pick_ao(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class RW_OT_sharpness_report(bpy.types.Operator):
+    """Render a 512 px close-up of each painted layer's Mask View, measure its edge width and say
+    what limits it (DIA-5). Render settings and the camera are restored afterwards"""
+    bl_idname = "realworn.sharpness_report"
+    bl_label = "Sharpness Report"
+
+    object: bpy.props.StringProperty(default="")
+    resolution: bpy.props.IntProperty(default=512, min=64, max=4096)
+
+    def execute(self, context):
+        import json
+        import math
+        import os
+        import tempfile
+        import numpy as np
+        from mathutils import Vector
+        from ..core import diagnostics, injector, metrics, setup
+        ob = bpy.data.objects.get(self.object) if self.object else context.active_object
+        if ob is None or not setup.is_setup(ob):
+            self.report({"WARNING"}, "Select a set-up object")
+            return {"CANCELLED"}
+        sc = context.scene
+        r, vs = sc.render, sc.view_settings
+        saved = (sc.camera, r.engine, r.resolution_x, r.resolution_y, r.resolution_percentage, r.filepath,
+                 r.image_settings.file_format, r.image_settings.color_depth, vs.view_transform, vs.look,
+                 sc.eevee.taa_render_samples)
+        corners = [ob.matrix_world @ Vector(c) for c in ob.bound_box]
+        centre = sum(corners, Vector()) / 8
+        size = max(ob.dimensions)
+        cam = bpy.data.objects.new("RW_SharpnessCam", bpy.data.cameras.new("RW_SharpnessCam"))
+        sc.collection.objects.link(cam)
+        cam.data.lens = 50
+        front = min(c.y for c in corners)
+        cam.location = (centre.x, front - size * 1.2, centre.z)  # a close-up of the front
+        cam.rotation_euler = (math.pi / 2, 0, 0)
+        rows, layer_widths = [], []
+        folder = tempfile.mkdtemp(prefix="rw_sharp_")
+        try:
+            sc.camera = cam
+            r.engine = "BLENDER_EEVEE"
+            r.resolution_x = r.resolution_y = self.resolution
+            r.resolution_percentage = 100
+            r.image_settings.file_format, r.image_settings.color_depth = "OPEN_EXR", "32"
+            vs.view_transform, vs.look = "Standard", "None"
+            sc.eevee.taa_render_samples = 8
+            for mat in setup.layered_materials(ob):
+                st = mat.realworn
+                keep = (st.active_layer_index, st.mask_view)
+                for i, ly in enumerate(st.layers):
+                    if not ly.visible or (ly.mask_image is None and not ly.ingredients):
+                        continue
+                    st.active_layer_index, st.mask_view = i, True
+                    injector.set_mask_view(mat, True)
+                    r.filepath = os.path.join(folder, "{}_{}.exr".format(mat.name, i))
+                    bpy.ops.render.render(write_still=True)
+                    img = bpy.data.images.load(r.filepath, check_existing=False)
+                    px = np.empty(img.size[0] * img.size[1] * 4, np.float32)
+                    img.pixels.foreach_get(px)
+                    bpy.data.images.remove(img)
+                    w = metrics.edge_width(px.reshape(self.resolution, self.resolution, 4)[..., 0])
+                    layer_widths.append((ly, w))
+                st.active_layer_index, st.mask_view = keep
+                injector.set_mask_view(mat, st.mask_view)
+            rows = diagnostics.report_rows(ob, layer_widths)
+        finally:
+            (sc.camera, r.engine, r.resolution_x, r.resolution_y, r.resolution_percentage, r.filepath,
+             r.image_settings.file_format, r.image_settings.color_depth, vs.view_transform, vs.look,
+             sc.eevee.taa_render_samples) = saved
+            bpy.data.objects.remove(cam)
+        sc["rw_sharpness_report"] = json.dumps({"object": ob.name, "px": self.resolution, "rows": rows})
+        for name, w, lim in rows:
+            self.report({"INFO"}, "{}: {}, limited by {}".format(name, "{:.1f} px".format(w) if w else "no edge", lim))
+        return {"FINISHED"}
+
+
 class RW_OT_upgrade_masks(bpy.types.Operator):
     """Resample this object's masks to the current texel density (bicubic, paint kept) and give
     relief-driving layers 16-bit masks. Undoable"""
@@ -188,7 +263,7 @@ class RW_OT_hero_toggle(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_upgrade_masks, RW_OT_hero_toggle, RW_OT_fix_texture_limit, RW_OT_fix_simplify_textures, RW_OT_fix_anisotropic, RW_OT_apply_v21_defaults,
+_classes = (RW_OT_sharpness_report, RW_OT_upgrade_masks, RW_OT_hero_toggle, RW_OT_fix_texture_limit, RW_OT_fix_simplify_textures, RW_OT_fix_anisotropic, RW_OT_apply_v21_defaults,
             RW_OT_refresh_base, RW_OT_pick_ao)
 
 

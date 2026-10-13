@@ -79,3 +79,29 @@ def test_texel_density_readout(painted):
     assert px == pytest.approx(2048 * k / 100.0)
     assert diagnostics.readout(ob, ly)[0][0] == "Mask"
     assert diagnostics.grunge_px_per_cm(ly.mask_image, 0.5) == pytest.approx(2048 / 50.0)
+
+
+def test_dia5_sharpness_report(empty_scene):
+    """DIA-5: per-layer edge width of a close-up Mask View and the source that limits it; render
+    settings and camera are restored."""
+    import json
+    sc = empty_scene
+    base = su.corpus_material("metal_plate")
+    if base is None:
+        pytest.skip("Poly Haven corpus not downloaded")
+    ob, mat = su.crate(sc, size=0.3, material=base)
+    for kind, c in (("DIRT", (-0.04, -0.15, 0.12)), ("RUST", (0.05, -0.15, 0.2))):
+        ly = layers.add_layer(mat, kind)
+        su.paint_layer(ob, mat, ly, lambda r, c=c: su.soft_disk(r, su.uv_at(ob, c), 0.04 * su.uv_per_metre(ob, c),
+                                                                  0.02 * su.uv_per_metre(ob, c)))
+    sc.render.engine, sc.render.resolution_x = "CYCLES", 777
+    assert bpy.ops.realworn.sharpness_report(object=ob.name) == {"FINISHED"}
+    data = json.loads(sc["rw_sharpness_report"])
+    rows = {r[0]: r for r in data["rows"]}
+    print("\n[DIA-5] " + "; ".join("{}: {} px, limited by {}".format(n, None if w is None else round(w, 2), lim)
+                                    for n, w, lim in data["rows"]))
+    assert set(rows) == {"Dirt", "Rust"}
+    assert all(r[1] is not None and r[1] < 6 for r in rows.values())
+    assert "Base Height" in rows["Dirt"][2] and "Grunge breakup_rust" in rows["Rust"][2]  # Edge Detail decides
+    assert sc.render.engine == "CYCLES" and sc.render.resolution_x == 777 and sc.camera is None
+    assert "RW_SharpnessCam" not in bpy.data.objects

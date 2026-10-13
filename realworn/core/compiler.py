@@ -423,7 +423,14 @@ def apply_content(b, layer, mask, cur, ctx):
             r, g, bl = b.sep(col)
             col = b.comb(r, b.sub(1.0, g), bl)
         b.links.new(col, nm.inputs["Color"])
-        cur["Normal"] = b.mixv(mask, cur["Normal"], nm.outputs["Normal"])
+        if layer.id_data.realworn.v21:
+            # BMP-2: the layer's normal detail is added to the normal below (masked), so base relief
+            # still reads through: n = normalize(below + mask * (layer - geometry)); world-space
+            # detail blending in the spirit of a reoriented normal blend
+            detail_n = b.vmath("SUBTRACT", nm.outputs["Normal"], _geometry_normal(b))
+            cur["Normal"] = b.vmath("NORMALIZE", b.vmath("ADD", cur["Normal"], b.vmath("SCALE", detail_n, scale=mask)))
+        else:
+            cur["Normal"] = b.mixv(mask, cur["Normal"], nm.outputs["Normal"])  # v2.0 files: unchanged
     if layer.height.enabled:
         val = _channel_source(b, layer, "height", layer.height, True)
         mode = layer.height.blend if layer.height.blend in ("ADD", "SUBTRACT", "MAX", "REPLACE") else "ADD"
@@ -434,6 +441,17 @@ def apply_content(b, layer, mask, cur, ctx):
             cur["Height"] = b.value_node("h0", 0.0)
         cur["Height"] = b.add(cur["Height"], b.mul(mask, b.outp(look, "Height")))
         ctx["height_used"] = True
+
+
+def _geometry_normal(b):
+    """One shared Geometry node per stack (the smooth surface normal)."""
+    name = naming.layer_node("stack", "geom")
+    n = b.nodes.get(name)
+    if n is None:
+        n = b.nodes.new("ShaderNodeNewGeometry")
+        n.name = name
+        n.location = (-300, 800)
+    return n.outputs["Normal"]
 
 
 class _AoChannel:
@@ -513,6 +531,12 @@ def compile(mat):
         b.end(300 * (idx + 1))
     b.begin("stack")
     normal = cur["Normal"]
+    if mat.realworn.v21 and ctx["displacement"] is not None and cur["Height"] is not None:
+        # BMP-4: with real displacement, all layer relief is ONE height on the Displacement output;
+        # Blender's Displacement and Bump method bumps the fine detail from that same height, so
+        # bump and displacement always agree (and the stack adds no Bump of its own)
+        ctx["displacement"] = b.add(cur["Height"], ctx["displacement"])
+        ctx["height_used"] = False
     if ctx["height_used"] and cur["Height"] is not None:
         bump = b.named("ShaderNodeBump", "bump", Strength=1.0, Distance=0.001)
         b.links.new(cur["Height"], bump.inputs["Height"])

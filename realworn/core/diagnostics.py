@@ -137,6 +137,26 @@ def readout(obj, layer):
     return lines
 
 
+def limit_text(obj, layer):
+    """DIA-5: which source limits the layer's edge, e.g. 'Base Height red_brick_disp_1k (4.1 px/cm)'."""
+    rows = readout(obj, layer)
+    detail_rows = detail_px_per_cm(obj, layer)
+    if detail_rows:  # with Edge Detail on, the detail source decides the edge, not the mask (S2)
+        rows = detail_rows
+    if not rows:
+        return "nothing painted"
+    name, px = min(rows, key=lambda r: r[1])
+    return "{} ({:.1f} px/cm)".format(name, px)
+
+
+def report_rows(obj, layer_widths):
+    """DIA-5 table: [(layer name, W px or None, limiting source text)] for measured layers."""
+    out = []
+    for layer, w in layer_widths:
+        out.append((layer.name, w, limit_text(obj, layer)))
+    return out
+
+
 def detail_px_per_cm(obj, layer):
     """(label, px per cm) of the layer's active Edge Detail source, when it has one (v2.1 Q1+)."""
     det = getattr(layer, "detail", None)
