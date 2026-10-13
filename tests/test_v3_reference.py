@@ -19,6 +19,7 @@ import bpy
 import numpy as np
 import pytest
 
+from reference_realworn import build_pair, realworn_look
 from fixtures import reference_wall as R
 from perf_log import record
 
@@ -61,3 +62,32 @@ def test_r0_reference_target(empty_scene, out_dir):
         print("\n[ref] {} coverage of the layout {:.3f}".format(key, cov))
         assert cov > 0.0005, key  # the drips are thin streaks: 0.1 % of the layout
     assert 0.05 < float(px.mean()) < 0.9
+
+
+def compare_stage(sc, out_dir, milestone, upto):
+    """REF-3: render both walls, compare, save the side-by-side and the diff to docs/milestones."""
+    wall, ref, arr = build_pair(sc, upto)
+    realworn_look(wall, upto)
+    folder = os.path.join(MILESTONES, milestone)
+    os.makedirs(folder, exist_ok=True)
+    wall.hide_render, ref.hide_render = True, False
+    a = R.render(sc, os.path.join(out_dir, "ref_{}.png".format(upto)))
+    wall.hide_render, ref.hide_render = False, True
+    b = R.render(sc, os.path.join(out_dir, "rw_{}.png".format(upto)))
+    mad, block = R.compare(a, b)
+    R.save_rgb(np.concatenate([a, b], axis=1), os.path.join(folder, "reference_vs_realworn_{}.png".format(upto)))
+    R.save_rgb(R.diff_image(a, b), os.path.join(folder, "diff_{}_x5.png".format(upto)))
+    record("v3 REF-3 {} (up to {}): mean abs difference".format(milestone, upto), mad, "", MAD_MAX,
+           "Cycles CPU 128 spp 512 px; reference Mix Shader tree vs RealWorn")
+    record("v3 REF-3 {} (up to {}): worst 32 px block".format(milestone, upto), block, "", BLOCK_MAX, "")
+    print("\n[REF-3] up to {}: MAD {:.4f} (max {}), worst 32 px block {:.4f} (max {})".format(
+        upto, mad, MAD_MAX, block, BLOCK_MAX))
+    return mad, block, wall
+
+
+# ------------------------------------------------------------------ R1
+def test_r1_base_and_variations(empty_scene, out_dir):
+    mad, block, wall = compare_stage(empty_scene, out_dir, "R1", "variations")
+    mat = wall.material_slots[0].material
+    assert [ly.kind for ly in mat.realworn.layers] == ["VARIATION"] * 4
+    assert mad < MAD_MAX and block < BLOCK_MAX
