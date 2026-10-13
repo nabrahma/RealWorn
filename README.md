@@ -66,7 +66,7 @@ which holds nodes only for what the visible layers use.
 ## Measured limits (docs/perf.md, machine: Windows 11, RTX 3060 Laptop)
 
 - Cycles render overhead of 4 typical live layers on a light 6-cube test scene, GPU (OptiX):
-  **+34%** with Cycles defaults (budget +40%), **+15-17%** after Bake (budget +15%: on the line, varies run to run).
+  **+34%** with Cycles defaults (budget +40%), **+15-19%** after Bake (budget +15%: on the line, varies run to run).
   Per fixed sample the shading itself costs more: **+48%** live and **+32%** baked (known
   limitation). On CPU the live overhead is about +80%. Bump re-evaluates every height-carrying
   mask, so disable layer Height where you do not need relief, and Bake before heavy finals.

@@ -191,7 +191,3 @@ def duplicate_layer(mat, index):
         st.active_layer_index = index + 1
     compiler.compile(mat)
     return st.layers[index + 1]
-
-
-def set_visible(mat, index, state):
-    mat.realworn.layers[index].visible = state  # structural: the callback recompiles

@@ -210,3 +210,17 @@ def test_remove_leaves_nothing(empty_scene):
     setup.remove_object(ob)
     assert not ob.modifiers and mat.displacement_method == method
     assert not nodeutil.owned_nodes(mat.node_tree)
+
+
+def test_displacement_warns_on_coarse_mesh(empty_scene):
+    """DMG-9: Displacement on a coarse mesh warns and suggests a subdivision level; a dense mesh or
+    switching back to Shader clears the warning."""
+    sc = empty_scene
+    coarse, mat = cube(sc, "Coarse", cuts=0, size=2.0)
+    ly = damage_layer(coarse, mat, "DISPLACEMENT", pred=lambda c: True)
+    assert "too coarse" in ly.damage.get("rw_warning", "")
+    ly.damage.depth_mode = "SHADER"
+    assert "rw_warning" not in ly.damage
+    dense, mat2 = cube(sc, "Dense", cuts=40, size=1.0, loc=(3, 0, 0.5))
+    ly2 = damage_layer(dense, mat2, "DISPLACEMENT", pred=lambda c: True)
+    assert "rw_warning" not in ly2.damage, ly2.damage.get("rw_warning")

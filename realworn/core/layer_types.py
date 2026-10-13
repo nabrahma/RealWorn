@@ -9,7 +9,6 @@ SCALAR_BLENDS = ("MIX", "MIN", "MAX")
 HEIGHT_BLENDS = ("ADD", "SUBTRACT", "MAX", "REPLACE")
 SOURCES = ("FLAT", "IMAGE", "PBRSET", "TINTED_GRUNGE")
 CHANNEL_NAMES = ("color", "roughness", "metallic", "height")
-INGREDIENT_KINDS = ("GRUNGE", "EDGE", "CAVITY", "CONTACT", "UP", "REFERENCE")
 GENERATOR_KINDS = ("EDGE", "CAVITY", "CONTACT")  # need the RW_Masks modifier (ING-1)
 LOCK_SOURCES = ("NONE", "EDGE", "CAVITY", "CONTACT", "UP")
 

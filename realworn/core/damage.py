@@ -158,13 +158,18 @@ def sync(mat):
     from . import compiler
     geo = damage_layers(mat, "GEOMETRY")
     disp = damage_layers(mat, "DISPLACEMENT")
+    for ly in damage_layers(mat):  # a guard warning belongs to the mode that raised it
+        if ly not in geo[:1] + disp and "rw_warning" in ly.damage:
+            del ly.damage["rw_warning"]
     for obj in compiler.objects_using(mat):
         if geo:
             ensure_geometry(obj, geo[0])
         else:
             remove_geometry(obj)
         if disp:
-            ensure_subdiv(obj)
+            mod = ensure_subdiv(obj)
+            for ly in disp:
+                _coarse_guard(obj, ly, mod.levels)
         else:
             remove_subdiv(obj)
 
@@ -203,6 +208,16 @@ def remove_geometry(obj):
         obj.modifiers.remove(mod)
         return True
     return False
+
+
+def _coarse_guard(obj, layer, levels):
+    """DMG-9: warn when the mesh needs more subdivision than RW_DisplaceSubdiv gives in EEVEE."""
+    need = coarse_for_displacement(obj, layer.damage.depth_mm)
+    if need > levels:
+        layer.damage["rw_warning"] = ("{}: too coarse for {:.0f} mm dents; subdivide about {} levels "
+                                      "(Cycles dices adaptively)".format(obj.name, layer.damage.depth_mm, need))
+    elif "rw_warning" in layer.damage:
+        del layer.damage["rw_warning"]
 
 
 def ensure_subdiv(obj, viewport_levels=2):

@@ -1,3 +1,5 @@
+"""The add-on registers its sidebar panel and runs on a supported Blender."""
+
 import bpy
 
 

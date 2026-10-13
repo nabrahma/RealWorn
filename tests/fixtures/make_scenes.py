@@ -1,20 +1,13 @@
-"""Builds every test fixture from code (PRD Testing > Test fixtures).
+"""Test fixtures built from code: meshes, materials, a camera and lights.
 
-Functions return objects linked into the given scene. Running this file saves the
-demo scenes to tests/fixtures/scenes/*.blend:
-
-    $BLENDER_BIN --background --factory-startup --python tests/fixtures/make_scenes.py
+Functions return objects linked into the given scene; nothing is saved to disk.
 """
 
 import math
-import os
 
 import bmesh
 import bpy
 from mathutils import Matrix, Vector
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-SCENES = os.path.join(HERE, "scenes")
 
 
 # --------------------------------------------------------------------- helpers
@@ -122,19 +115,6 @@ def pipe(scene, name="Pipe", radius=0.15, length=2.0, location=(0, 0, 0.3), mate
     return _link(scene, name, bm, location, material)
 
 
-def wall_with_window(scene, name="Wall", width=4.0, height=3.0, thick=0.25, location=(0, 0, 0), material=None):
-    """Wall with a window opening and a protruding sill (overhang for leaks)."""
-    bm = bmesh.new()
-    wx0, wx1, wz0, wz1 = -0.6, 0.6, 1.0, 2.2
-    hw = width / 2
-    for (x0, x1, z0, z1) in ((-hw, wx0, 0, height), (wx1, hw, 0, height), (wx0, wx1, 0, wz0), (wx0, wx1, wz1, height)):
-        _box(bm, (x1 - x0, thick, z1 - z0), ((x0 + x1) / 2, 0, (z0 + z1) / 2))
-    _box(bm, (wx1 - wx0 + 0.3, thick + 0.18, 0.08), (0, -0.09, wz0 - 0.04))  # sill
-    bmesh.ops.remove_doubles(bm, verts=bm.verts[:], dist=1e-4)
-    _subdivide(bm, 4)
-    return _link(scene, name, bm, location, material)
-
-
 def street(scene, name="Street", size=(6.0, 4.0), tiles=8, location=(0, 0, 0), material=None):
     """Flat ground slab with shallow grout grooves between tiles."""
     bm = bmesh.new()
@@ -150,27 +130,6 @@ def street(scene, name="Street", size=(6.0, 4.0), tiles=8, location=(0, 0, 0), m
     for p in ob.data.polygons:
         p.use_smooth = True
     return ob
-
-
-def kerb(scene, name="Kerb", length=6.0, location=(0, 1.8, 0.075), material=None):
-    bm = bmesh.new()
-    _box(bm, (length, 0.3, 0.15))
-    _subdivide(bm, 6)
-    return _link(scene, name, bm, location, material)
-
-
-def roof(scene, name="Roof", size=(3.0, 2.0, 0.15), location=(0, 0, 3.0), material=None):
-    bm = bmesh.new()
-    _box(bm, size)
-    return _link(scene, name, bm, location, material)
-
-
-def dense_sphere(scene, name="DenseSphere", verts_target=100_000, location=(0, 0, 1)):
-    """UV sphere with about `verts_target` vertices for the performance budget."""
-    seg = int(math.sqrt(verts_target * 2))
-    bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=seg, v_segments=seg // 2, radius=1.0)
-    return _link(scene, name, bm, location)
 
 
 def camera_light(scene, cam_loc=(5.5, -6.0, 3.2), target=(0, 0, 0.8), lens=35):
@@ -196,7 +155,7 @@ def camera_light(scene, cam_loc=(5.5, -6.0, 3.2), target=(0, 0, 0.8), lens=35):
 
 # --------------------------------------------------------------------- scenes
 def demo_props(scene):
-    """M1-M3 demo: crate, painted cube, pipe, L-block on a floor, with camera."""
+    """Mixed props on a floor (crate, bevelled cube, pipe, L-block), with camera and lights."""
     floor = street(scene, material=principled("Floor_Concrete", (0.42, 0.41, 0.4), roughness=0.8))
     obs = [
         crate(scene, material=principled("Crate_Paint", (0.12, 0.3, 0.16), roughness=0.45), location=(-1.4, 0.3, 0.5)),
@@ -207,35 +166,3 @@ def demo_props(scene):
     ]
     camera_light(scene, cam_loc=(4.5, -5.2, 3.0), target=(0.2, 0.0, 0.4))
     return floor, obs
-
-
-def demo_alley(scene):
-    """M4+ demo: street, kerb, two walls with windows, a roof overhang, crates."""
-    floor = street(scene, size=(8.0, 6.0), tiles=10, material=principled("Asphalt", (0.09, 0.09, 0.09), roughness=0.75))
-    k = kerb(scene, length=8.0, location=(0, 1.3, 0.075), material=principled("Kerb_Concrete", (0.5, 0.5, 0.48), roughness=0.85))
-    w1 = wall_with_window(scene, name="WallBack", width=8.0, location=(0, 2.6, 0),
-                          material=principled("Brick_Plaster", (0.55, 0.38, 0.3), roughness=0.85))
-    w2 = wall_with_window(scene, name="WallSide", width=6.0, location=(-3.9, 0, 0),
-                          material=principled("Plaster_Grey", (0.6, 0.6, 0.58), roughness=0.9))
-    w2.rotation_euler = (0, 0, math.pi / 2)
-    rf = roof(scene, name="Awning", size=(2.4, 1.4, 0.1), location=(2.2, 1.9, 2.6),
-              material=principled("Awning_Metal", (0.3, 0.05, 0.05), metallic=0.6, roughness=0.4))
-    crates = [crate(scene, name="Crate.%d" % i, location=(1.2 + i * 1.1, 1.9, 0.5),
-                    material=principled("Crate_Wood_%d" % i, (0.35, 0.22, 0.12), roughness=0.7)) for i in range(2)]
-    camera_light(scene, cam_loc=(3.5, -5.0, 1.6), target=(0.0, 1.5, 0.9), lens=28)
-    return dict(floor=floor, kerb=k, walls=[w1, w2], roof=rf, crates=crates)
-
-
-def save_demo(builder, filename):
-    bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True)
-    scene = bpy.context.scene
-    builder(scene)
-    os.makedirs(SCENES, exist_ok=True)
-    path = os.path.join(SCENES, filename)
-    bpy.ops.wm.save_as_mainfile(filepath=path)
-    return path
-
-
-if __name__ == "__main__":
-    for b, f in ((demo_props, "demo_props.blend"), (demo_alley, "demo_alley.blend")):
-        print("[RealWorn] saved", save_demo(b, f))

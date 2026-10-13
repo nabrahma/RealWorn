@@ -175,8 +175,8 @@ def draw_content(layout, mat, layer):
             for p in ("threshold", "size_min", "size_max", "density", "debris", "live"):
                 box.prop(layer.damage, p)
             opx(box, "realworn.damage_apply", icon="CHECKMARK")
-            if layer.damage.get("rw_warning"):
-                box.label(text=layer.damage["rw_warning"], icon="ERROR")
+        if layer.damage.get("rw_warning"):  # DMG-9 guards (closed mesh, too coarse)
+            box.label(text=layer.damage["rw_warning"], icon="ERROR")
         opx(box, "realworn.damage_dirt", icon="BRUSH_DATA")
     elif layer.type == "DECAL":
         box = layout.box()

@@ -1,4 +1,5 @@
-"""M1 mask engine acceptance tests (PRD M1, MASK-1..MASK-9)."""
+"""RW_Masks generators behind the Edge, Cavity and Contact ingredients (rw_edge, rw_cavity,
+rw_contact): widths in metres, pre-subdivision, convex sign, timing."""
 
 import time
 
@@ -53,7 +54,7 @@ def test_edge_thresholds_on_cubes(empty_scene, maker):
 def test_bevel_cube_edges(empty_scene):
     """A 4 cm, 3-segment bevel: inner bevel edges are 30 deg (detected), the boundary rows
     15 deg (not). Wear covers the middle of the bevel; a bevel much wider than Edge Width
-    needs a wider Edge Width to be fully covered (documented in M1 notes)."""
+    needs a wider Edge Width to be fully covered."""
     ob = ms.bevel_cube(empty_scene)
     r = _eval(ob)
     pts = [_local(ob, c) for c in r["co"]]
