@@ -222,6 +222,7 @@ def restore(mat):
         st.snapshot = ""
         st.mode = ""
         st.baked = False
+        st.v21, st.base_height_kind, st.base_height_image = False, "", ""
         _drop_group(mat)
         if mat.get("rw_disp_method") is not None:
             mat.displacement_method = mat["rw_disp_method"]

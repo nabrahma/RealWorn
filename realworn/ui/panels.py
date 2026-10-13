@@ -97,6 +97,11 @@ def _draw_header(layout, context, ob, mat):
     box.label(text="Painting on RW_Paint" + (", {} px".format(res) if res else ""), icon="UV")
     if mat.realworn.source_material:
         box.label(text="Unique copy of {} (was shared)".format(mat.realworn.source_material), icon="LINKED")
+    if not mat.realworn.v21:  # EDG-9: a v2.0 material; nothing changes until this is clicked
+        row = layout.row()
+        row.scale_y = 1.2
+        op = opx(row, "realworn.apply_v21_defaults", icon="SHADERFX")
+        op.material = mat.name
     return True
 
 
@@ -189,9 +194,51 @@ def draw_content(layout, mat, layer):
         opx(layout, "realworn.paint_enter", text="Paint Colour", icon="TPAINT_HLT").target = "CONTENT"
 
 
+def draw_edge_detail(layout, mat, layer):
+    """PRD v2.1 Edge Detail (EDG-1..EDG-8)."""
+    from ..core import detail
+    det = layer.detail
+    box = layout.box()
+    row = box.row(align=True)
+    row.label(text="Edge Detail", icon="SHADERFX")
+    row.prop(det, "strength", slider=True, text="")
+    if det.strength <= 0:
+        box.label(text="Off: Strength above 0 lets a detail texture shape the edge", icon="INFO")
+        return
+    box.row(align=True).prop(det, "mode", expand=True)
+    box.prop(det, "source")
+    used, _ = detail.resolve(mat, layer)
+    if det.source == "BASE_HEIGHT" and used != "BASE_HEIGHT":
+        box.label(text="No base height map: using the grunge", icon="INFO")
+    if used is None:
+        box.label(text="Pick a grunge image to use Edge Detail", icon="ERROR")
+    if used == "BASE_HEIGHT":
+        st = mat.realworn
+        r = box.row(align=True)
+        r.prop(st, "base_height_lo", text="Low")
+        r.prop(st, "base_height_hi", text="High")
+    if used != "BASE_HEIGHT" or det.source == "LAYER_GRUNGE":
+        box.template_ID(det, "image", open="image.open")
+        r = box.row(align=True)
+        r.prop(det, "scale")
+        r.prop(det, "rotation", text="")
+        r.prop(det, "offset", text="")
+        box.prop(det, "cubic")
+    r = box.row(align=True)
+    r.prop(det, "width", slider=True)
+    r.prop(det, "threshold", slider=True)
+    r = box.row(align=True)
+    r.prop(det, "contrast", slider=True)
+    r.prop(det, "invert", toggle=True)
+    if det.mode == "ERODE":
+        box.prop(det, "protect")
+    box.prop(mat.realworn, "detail_split", toggle=True, icon="MOD_MASK")
+
+
 def draw_mask(layout, mat, layer):
     st = mat.realworn
     layout.prop(st, "mask_view", toggle=True, icon="MOD_MASK")
+    draw_edge_detail(layout, mat, layer)
     box = layout.box()
     box.label(text="Ingredients (start at 0: pure painting)")
     for i, ing in enumerate(layer.ingredients):

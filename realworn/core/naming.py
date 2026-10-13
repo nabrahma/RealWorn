@@ -36,8 +36,11 @@ SH_WATER = "RW_P_Water"
 SH_DAMAGE = "RW_P_Damage"
 SH_DECAL_PROJECT = "RW_DecalProject"
 SH_VARIATION = "RW_P_Variation"
+SH_EDGE_ERODE = "RW_P_EdgeErode"     # v2.1 Edge Detail modes (EDG-1..EDG-8)
+SH_EDGE_BURN = "RW_P_EdgeBurn"
+SH_EDGE_HEIGHT = "RW_P_EdgeHeight"
 ALL_GROUPS = (GN_MASKS, GN_DAMAGE, SH_PAINT_OVER, SH_EDGE_LOCK, SH_HEIGHT_BLEND, SH_LEVELS, SH_UP, SH_CONTRAST,
-              SH_VARIATION, SH_WATER, SH_DAMAGE, SH_DECAL_PROJECT)
+              SH_VARIATION, SH_WATER, SH_DAMAGE, SH_DECAL_PROJECT, SH_EDGE_ERODE, SH_EDGE_BURN, SH_EDGE_HEIGHT)
 
 # Per-material stack group (CMP-1): only core/compiler.py edits its contents.
 STACK_PREFIX = "RW_Stack::"

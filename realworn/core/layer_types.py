@@ -79,6 +79,55 @@ LAYER_DEFAULTS = {"use_height_blend": False, "height_blend": 0.0, "lock_source":
                   "threshold": 0.5, "softness": 1.0}
 
 
+# ------------------------------------------------------------------ v2.1 Edge Detail
+DETAIL_MODES = ("ERODE", "BURN", "HEIGHT")
+DETAIL_SOURCES = ("LAYER_GRUNGE", "BASE_HEIGHT", "BASE_AO", "CONTENT_HEIGHT", "GRUNGE2")
+DETAIL_OFF = {"mode": "ERODE", "source": "LAYER_GRUNGE", "strength": 0.0, "width": 0.05, "threshold": 0.5,
+              "protect": True, "grunge": None, "scale": 0.25}
+
+
+def _det(mode, source, strength, width, protect, grunge, scale):
+    return {"mode": mode, "source": source, "strength": strength, "width": width, "threshold": 0.5,
+            "protect": protect, "grunge": grunge, "scale": scale}
+
+
+# PRD v2.1 "Defaults per layer type". `grunge` is the Layer Grunge (and the Base Height fallback
+# when the base has no height map); `scale` is its tile size in metres (SRC-7 suggested sizes).
+DETAIL = {
+    "DIRT": _det("HEIGHT", "BASE_HEIGHT", 0.7, 0.05, False, "grime_clouds", 0.3),
+    "DUST": _det("ERODE", "LAYER_GRUNGE", 0.5, 0.10, False, "speckle_fine", 0.25),
+    "RUST": _det("ERODE", "LAYER_GRUNGE", 0.8, 0.04, False, "breakup_rust", 0.25),
+    "WEAR": _det("ERODE", "LAYER_GRUNGE", 0.8, 0.02, True, "chips_small", 0.2),
+    "SCRATCHES": _det("ERODE", "LAYER_GRUNGE", 0.9, 0.02, True, "scratches_fine", 0.3),
+    "WATER": _det("HEIGHT", "BASE_HEIGHT", 0.8, 0.03, False, "smudge", 0.5),
+    "DAMAGE": _det("ERODE", "BASE_HEIGHT", 0.7, 0.03, True, "chips_small", 0.2),
+}
+
+
+def detail_defaults(kind):
+    """Edge Detail defaults for a layer type (Paint, Decal, Custom: off)."""
+    return dict(DETAIL.get(kind, DETAIL_OFF))
+
+
+def _smoothstep(a, b, x):
+    t = min(max((x - a) / (b - a), 0.0), 1.0) if b != a else float(x >= a)
+    return t * t * (3 - 2 * t)
+
+
+def edge_detail(mode, m, d, s, w, t=0.5, protect=False):
+    """Reference (pure Python) of the Edge Detail groups (builders/sh_edge_detail.py)."""
+    hw = max(w, 1e-3) / 2.0
+    if mode == "ERODE":
+        b = 1.0 + (min(max((1 - m) * 4, 0.0), 1.0) - 1.0) * (1.0 if protect else 0.0)
+        return _smoothstep(t - hw, t + hw, m - (1 - d) * s * b)
+    if mode == "BURN":
+        burn = min(max(1 - (1 - m) / max(d, 0.02), 0.0), 1.0)
+        return _smoothstep(t - hw, t + hw, m + (burn - m) * s)
+    if mode == "HEIGHT":
+        return _smoothstep(-hw, hw, m * s - d - (t - 0.5)) * min(max(m * 20, 0.0), 1.0)
+    raise KeyError(mode)
+
+
 def blends_for(channel):
     if channel == "color":
         return COLOR_BLENDS

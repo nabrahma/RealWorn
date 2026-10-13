@@ -3,9 +3,9 @@
 Order matters: a group is built after the groups it instances.
 """
 
-from . import gn_damage, gn_masks, sh_damage, sh_decal, sh_layer_parts, sh_water
+from . import gn_damage, gn_masks, sh_damage, sh_decal, sh_edge_detail, sh_layer_parts, sh_water
 
-BUILDERS = (gn_masks, gn_damage, sh_layer_parts, sh_water, sh_damage, sh_decal)
+BUILDERS = (gn_masks, gn_damage, sh_layer_parts, sh_edge_detail, sh_water, sh_damage, sh_decal)
 
 
 def build_all():

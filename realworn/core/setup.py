@@ -214,7 +214,10 @@ def setup_object(obj, use_existing_uv=False):
 
 def _wrap(obj, mat, rep):
     try:
-        injector.inject(mat)
+        if injector.inject(mat) == "setup":
+            from . import detail
+            mat.realworn.v21 = True  # v2.1 Setup: new layers get the per-type Edge Detail defaults
+            detail.capture_base(mat)  # SRC-2: base height normalisation
         mat.realworn.owner = obj.name
     except injector.InjectError as ex:
         rep.append(("WARNING", str(ex)))

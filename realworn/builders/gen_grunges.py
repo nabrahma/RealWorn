@@ -1,7 +1,8 @@
 """Procedural grunge images for the bundled library (GRN-1). Original CC0 work.
 
 Every image is tileable (periodic noise, toroidal distances, wrapped strokes) and greyscale,
-white = grunge. generate(out_dir) writes 512 px 8-bit greyscale PNGs through Blender;
+white = grunge. generate(out_dir) writes 2048 px 8-bit greyscale PNGs through Blender (v2.1:
+4x the v2.0 512 px, same look: pixel-sized parameters scale with the size);
 make_all() returns {name: float32 array} and is pure numpy (used by tests).
 
     "$BLENDER_BIN" --background --factory-startup --python scripts/make_grunges.py
@@ -9,7 +10,8 @@ make_all() returns {name: float32 array} and is pure numpy (used by tests).
 
 import numpy as np
 
-SIZE = 512
+SIZE = 2048
+REF = 512  # the size the recipes were tuned at; pixel-sized parameters scale by SIZE / REF
 
 
 # ------------------------------------------------------------------ noises
@@ -88,17 +90,18 @@ def strokes(rng, n, count, length, width, angle=None, angle_jitter=np.pi, intens
 
 
 def dots(rng, n, count, rmin, rmax, soft=0.5):
+    """Soft round dots, stamped locally (wrapping), so large sizes stay fast."""
     img = np.zeros((n, n), np.float32)
-    ys, xs = np.mgrid[0:n, 0:n].astype(np.float32)
     for _ in range(count):
         cx, cy = rng.random(2) * n
         r = rng.uniform(rmin, rmax)
-        dx = np.abs(xs - cx)
-        dy = np.abs(ys - cy)
-        dx = np.minimum(dx, n - dx)
-        dy = np.minimum(dy, n - dy)
-        d = np.sqrt(dx * dx + dy * dy)
-        img = np.maximum(img, 1 - smooth(d, r * (1 - soft), r))
+        k = int(np.ceil(r)) + 1
+        xs = np.arange(int(cx) - k, int(cx) + k + 1)
+        ys = np.arange(int(cy) - k, int(cy) + k + 1)
+        d = np.sqrt((xs[None, :] + 0.0 - cx) ** 2 + (ys[:, None] + 0.0 - cy) ** 2).astype(np.float32)
+        v = 1 - smooth(d, r * (1 - soft), r)
+        iy, ix = np.ix_(ys % n, xs % n)
+        img[iy, ix] = np.maximum(img[iy, ix], v)
     return img
 
 
@@ -110,14 +113,16 @@ def _spots(rng, n, cells, thr):
 
 def make_all(n=SIZE, seed=2026):
     rng = np.random.default_rng(seed)
+    px = n / float(REF)  # pixel-sized parameters (radii, widths, blur) keep their size per tile
+    bl = max(1, int(round(px * px)))  # box-blur passes: variance grows linearly with passes
     g = {}
     g["spots_fine"] = _spots(rng, n, 16, 0.58)
     g["spots_medium"] = _spots(rng, n, 8, 0.6)
     g["spots_large"] = _spots(rng, n, 4, 0.52)
     cell = worley(rng, n, 60)
     g["rust_spots"] = np.clip(smooth(1 - cell, 0.55, 0.85) * smooth(value_noise(rng, n, 6, 4), 0.4, 0.65) * 1.3, 0, 1)
-    g["speckle_fine"] = dots(rng, n, 1400, 0.6, 1.6, 0.3)
-    g["speckle_coarse"] = dots(rng, n, 260, 1.5, 4.0, 0.4)
+    g["speckle_fine"] = dots(rng, n, 1400, 0.6 * px, 1.6 * px, 0.3)
+    g["speckle_coarse"] = dots(rng, n, 260, 1.5 * px, 4.0 * px, 0.4)
     vs = value_noise(rng, n, 4, 4)
     stretch = np.repeat(value_noise(rng, n, 32, 3)[:1], n, 0)  # columns vary, rows constant
     g["streaks_vertical"] = np.clip(smooth(stretch, 0.45, 0.75) * (0.4 + 0.6 * vs), 0, 1)
@@ -125,17 +130,17 @@ def make_all(n=SIZE, seed=2026):
     for _ in range(70):
         x = int(rng.random() * n)
         y0, ln = int(rng.random() * n), int(rng.uniform(0.15, 0.6) * n)
-        w = rng.uniform(1.0, 3.5)
+        w = rng.uniform(1.0, 3.5) * px
         ys = (y0 + np.arange(ln)) % n
         fade = np.linspace(1, 0.15, ln)
         for dx in range(-int(w), int(w) + 1):
             drips[ys, (x + dx) % n] = np.maximum(drips[ys, (x + dx) % n], fade * (1 - abs(dx) / (w + 1)))
-    g["streaks_drips"] = blur(drips, 1)
+    g["streaks_drips"] = blur(drips, bl)
     leak_cols = smooth(np.repeat(value_noise(rng, n, 12, 2)[:1], n, 0), 0.5, 0.7)
     yy = np.linspace(0, 1, n)[:, None]
     g["leaks"] = np.clip(leak_cols * (0.5 + 0.5 * np.cos(2 * np.pi * yy)) * (0.6 + 0.4 * value_noise(rng, n, 8, 3)), 0, 1)
-    g["scratches_fine"] = strokes(rng, n, 160, 0.25, 0, intensity=(0.4, 0.9))
-    g["scratches_heavy"] = blur(strokes(rng, n, 40, 0.45, 1, angle=0.3, angle_jitter=0.8), 1)
+    g["scratches_fine"] = strokes(rng, n, 160, 0.25, round(0.5 * (px - 1)), intensity=(0.4, 0.9))
+    g["scratches_heavy"] = blur(strokes(rng, n, 40, 0.45, px, angle=0.3, angle_jitter=0.8), bl)
     chip_cell = worley(rng, n, 120)
     chip_mask = smooth(value_noise(rng, n, 8, 4), 0.55, 0.62)
     g["chips_small"] = ((chip_cell < 0.45) * chip_mask).astype(np.float32)
@@ -145,8 +150,8 @@ def make_all(n=SIZE, seed=2026):
     edges = worley(rng, n, 40, second=True, warp=warp)
     g["cracks"] = np.clip(1 - smooth(edges, 0.0, 0.03), 0, 1) * smooth(value_noise(rng, n, 4, 3), 0.25, 0.45)
     g["dust"] = np.clip(0.25 + 0.75 * smooth(value_noise(rng, n, 6, 6, 0.6), 0.35, 0.8), 0, 1) * \
-        (0.7 + 0.3 * dots(rng, n, 900, 0.5, 1.2, 0.2))
-    g["smudge"] = smooth(blur(value_noise(rng, n, 3, 3), 3), 0.45, 0.7)
+        (0.7 + 0.3 * dots(rng, n, 900, 0.5 * px, 1.2 * px, 0.2))
+    g["smudge"] = smooth(blur(value_noise(rng, n, 3, 3), 3 * bl), 0.45, 0.7)
     rings = np.zeros((n, n), np.float32)
     ys, xs = np.mgrid[0:n, 0:n].astype(np.float32)
     for _ in range(14):
@@ -155,12 +160,22 @@ def make_all(n=SIZE, seed=2026):
         dx = np.abs(xs - cx)
         dy = np.abs(ys - cy)
         d = np.sqrt(np.minimum(dx, n - dx) ** 2 + np.minimum(dy, n - dy) ** 2)
-        rings = np.maximum(rings, np.exp(-((d - r) / 2.2) ** 2) * 0.9 + (d < r) * 0.25)
+        rings = np.maximum(rings, np.exp(-((d - r) / (2.2 * px)) ** 2) * 0.9 + (d < r) * 0.25)
     g["stain_rings"] = np.clip(rings * (0.7 + 0.3 * value_noise(rng, n, 8, 3)), 0, 1)
-    g["edge_scuffs"] = blur(strokes(rng, n, 220, 0.06, 1, angle=0.0, angle_jitter=0.25), 1)
-    g["concrete_pores"] = dots(rng, n, 700, 0.8, 2.5, 0.25) * 0.9
+    g["edge_scuffs"] = blur(strokes(rng, n, 220, 0.06, px, angle=0.0, angle_jitter=0.25), bl)
+    g["concrete_pores"] = dots(rng, n, 700, 0.8 * px, 2.5 * px, 0.25) * 0.9
     g["grime_clouds"] = smooth(value_noise(rng, n, 5, 6, 0.55), 0.42, 0.68)
+    # v2.1 breakup maps for Edge Detail: about half white, boundaries at every scale (Erode keeps
+    # where the map is light, so a sparse stamp grunge would erase most of a stroke)
+    pits = 1.0 - worley(rng, n, 220)
+    g["breakup_rust"] = _stretch(0.55 * value_noise(rng, n, 10, 6, 0.6) + 0.45 * smooth(pits, 0.35, 0.95))
+    g["breakup_fine"] = _stretch(value_noise(rng, n, 24, 5, 0.55))
     return {k: np.clip(v, 0, 1).astype(np.float32) for k, v in g.items()}
+
+
+def _stretch(v, lo=2.0, hi=98.0):
+    a, b = np.percentile(v, (lo, hi))
+    return np.clip((v - a) / max(b - a, 1e-6), 0, 1)
 
 
 def generate(out_dir, n=SIZE):

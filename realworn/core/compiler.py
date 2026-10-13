@@ -143,10 +143,10 @@ def _paint_uv(b):
     return n.outputs[0]
 
 
-def _image_node(b, role, image, vector, non_color=True, box=False):
+def _image_node(b, role, image, vector, non_color=True, box=False, cubic=False):
     n = b.named("ShaderNodeTexImage", role)
     n.image = image
-    n.interpolation = "Linear"
+    n.interpolation = "Cubic" if cubic else "Linear"
     if box:
         n.projection = "BOX"
         n.projection_blend = 0.2
@@ -199,8 +199,52 @@ def _vertex_mask(b, layer):
     return n.outputs["Color"], n.outputs["Alpha"]
 
 
+def base_height_norm(b, mat):
+    """SRC-1/SRC-2: the base height (the stack's Height input, sampled once outside the stack)
+    normalised to 0..1 by ONE Map Range per stack, shared by every layer that uses it."""
+    name = naming.layer_node("stack", "bh")
+    n = b.nodes.get(name)
+    if n is None:
+        n = b.nodes.new("ShaderNodeMapRange")
+        n.name = name
+        n.clamp = True
+        b.links.new(b.gi.outputs["Height"], n.inputs["Value"])
+        n.location = (-300, 500)
+    st = mat.realworn
+    n.inputs[1].default_value, n.inputs[2].default_value = st.base_height_lo, st.base_height_hi
+    return n.outputs["Result"]
+
+
+_EDGE_GROUPS = {"ERODE": naming.SH_EDGE_ERODE, "BURN": naming.SH_EDGE_BURN, "HEIGHT": naming.SH_EDGE_HEIGHT}
+
+
+def edge_detail(b, layer, m):
+    """EDG-1..EDG-7: the Edge Detail stage on combined mask `m`; `m` itself when off (Strength 0
+    or no source: no nodes at all, lean compile)."""
+    from . import detail
+    det = layer.detail
+    if det.strength <= 0.0:
+        return m
+    mat = layer.id_data
+    src, img = detail.resolve(mat, layer)
+    if src == "BASE_HEIGHT":
+        d = base_height_norm(b, mat)
+    elif src == "LAYER_GRUNGE":
+        vec = _box_vector(b, "edge", det.scale, det.rotation, det.offset)
+        d = b.outp(_image_node(b, "edge.img", img, vec, box=True, cubic=det.cubic), "Color")
+    else:
+        return m
+    d = b.outp(b.group(naming.SH_CONTRAST, "edge.contrast", Value=d, Contrast=det.contrast,
+                       Invert=1.0 if det.invert else 0.0))
+    kw = dict(Mask=m, Detail=d, Strength=det.strength, Width=det.width, Threshold=det.threshold)
+    if det.mode == "ERODE":
+        kw["Protect"] = 1.0 if det.protect else 0.0
+    return b.outp(b.group(_EDGE_GROUPS[det.mode], "edge", **kw))
+
+
 def build_mask(b, layer, masks, base_height, decal_alpha=None):
-    """The layer's final mask socket, or None when nothing can show (PRD mask formula)."""
+    """The layer's final mask socket, or None when nothing can show (PRD mask formula; v2.1 adds
+    Edge Detail after paint-over and ingredients, before Edge Lock)."""
     P = None
     for i, ing in enumerate(layer.ingredients):
         term = _ingredient(b, layer, i, ing, masks)
@@ -220,6 +264,8 @@ def build_mask(b, layer, masks, base_height, decal_alpha=None):
                            Paint=tex.outputs["Color"], Alpha=tex.outputs["Alpha"]))
     if P is None:
         return None
+    b.pre_detail = P
+    P = edge_detail(b, layer, P)
     if layer.lock_source != "NONE":
         lock = _generator(b, layer.lock_source, "lock.gen")
         P = b.outp(b.group(naming.SH_EDGE_LOCK, "lock", Mask=P, Lock=lock, Strength=layer.lock_strength))
@@ -348,6 +394,7 @@ def compile(mat):
             continue
         b.begin(layer.id)
         b.layer_color = None
+        b.pre_detail = None
         decal_alpha = None
         if layer.type == "DECAL":
             from . import decals
@@ -373,6 +420,11 @@ def compile(mat):
             ctx["coverage"] = mask if ctx["coverage"] is None else b.max(ctx["coverage"], mask)
             if mat.realworn.mask_view and idx == active:
                 ctx["mask_view"] = mask
+                if mat.realworn.detail_split and b.pre_detail is not None and layer.detail.strength > 0:
+                    # EDG-8: before | after Edge Detail, side by side on screen (left / right half)
+                    tc = b.named("ShaderNodeTexCoord", "split.tc")
+                    x, _, _ = b.sep(tc.outputs["Window"])
+                    ctx["mask_view"] = b.mixf(b.math("GREATER_THAN", x, 0.5), b.pre_detail, mask)
                 if mat.realworn.view_channel == "COLOR":  # bake helpers read the layer's own colour
                     ctx["layer_color"] = getattr(b, "layer_color", None)
         b.end(300 * (idx + 1))
@@ -506,6 +558,27 @@ def set_value(mat, path):
         targets += damage.value_targets(layer, prop)
     elif sub == "decal":
         targets.append(("decal", prop.title(), getattr(layer.decal, prop)))
+    elif sub == "detail":
+        det = layer.detail
+        edge = g.nodes.get(naming.layer_node(lid, "edge"))
+        if prop == "strength":
+            if det.strength <= 0.0 or edge is None:
+                return False  # EDG-10: crossing 0 adds or removes the stage
+            targets.append(("edge", "Strength", det.strength))
+        elif prop in ("width", "threshold"):
+            targets.append(("edge", prop.title(), getattr(det, prop)))
+        elif prop == "protect":
+            targets.append(("edge", "Protect", 1.0 if det.protect else 0.0))
+        elif prop in ("contrast", "invert"):
+            targets.append(("edge.contrast", "Contrast" if prop == "contrast" else "Invert",
+                            det.contrast if prop == "contrast" else (1.0 if det.invert else 0.0)))
+        elif prop in ("scale", "rotation", "offset"):
+            sc = 1.0 / max(det.scale, 1e-4)
+            o = det.offset
+            targets += [("edge.map", "Scale", (sc, sc, sc)), ("edge.map", "Rotation", (0.0, 0.0, det.rotation)),
+                        ("edge.map", "Location", (o, o * 0.7, o * 0.3))]
+        else:
+            return False
     else:
         return False
     if not targets:
@@ -522,6 +595,17 @@ def set_value(mat, path):
         except (KeyError, TypeError):
             return False
     return True
+
+
+def on_material_value(mat, prop):
+    """Material-level value properties: the base height normalisation (one shared node)."""
+    if not isinstance(mat, bpy.types.Material) or suspended(mat) or not mat.realworn.applied:
+        return
+    g = mat.realworn.stack
+    n = g.nodes.get(naming.layer_node("stack", "bh")) if g is not None else None
+    if n is not None:
+        n.inputs[1].default_value = mat.realworn.base_height_lo
+        n.inputs[2].default_value = mat.realworn.base_height_hi
 
 
 def on_active_layer(pg):

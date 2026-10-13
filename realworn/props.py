@@ -44,6 +44,13 @@ GRUNGE_MODE_ITEMS = [("STAMP", "Stamp", "Each dab samples a random patch (dirt, 
 DECAL_MODE_ITEMS = [("FULL", "Full", "Color with alpha, roughness, optional normal map"),
                     ("GRIME", "Grime", "Only darkens and changes roughness (stains, soot, leaks)"),
                     ("DAMAGE", "Damage", "Reveals what is below and adds a dent")]
+DETAIL_MODE_ITEMS = [
+    ("ERODE", "Erode", "Push the mask down where the detail is dark, then sharpen (default)"),
+    ("BURN", "Burn", "Color Burn the mask against the detail (Blender Guru look)"),
+    ("HEIGHT", "Height Compare", "The stroke is a water level against the detail as terrain: fills low spots first")]
+DETAIL_SOURCE_ITEMS = [
+    ("LAYER_GRUNGE", "Layer Grunge", "The grunge image below, box-projected in object space"),
+    ("BASE_HEIGHT", "Base Height", "The base material's height map (falls back to the grunge without one)")]
 RES_ITEMS = [(str(r), str(r), "") for r in (256, 512, 1024, 2048, 4096)]
 EXPORT_ITEMS = [("UNITY_URP", "Unity URP", "BaseMap, MetallicSmoothness, Normal (OpenGL)"),
                 ("UNITY_HDRP", "Unity HDRP", "BaseColor, MaskMap (M, AO, Detail, Smoothness), Normal (OpenGL)"),
@@ -64,6 +71,14 @@ def _v(prop):
 def _struct(self, context):
     from .core import compiler
     compiler.on_struct(self)
+
+
+def _mat_v(prop):
+    """VALUE update for a material-level property (base height normalisation)."""
+    def update(self, context):
+        from .core import compiler
+        compiler.on_material_value(self.id_data, prop)
+    return update
 
 
 def _active_layer(self, context):
@@ -179,6 +194,30 @@ class RWDecal(bpy.types.PropertyGroup):
     darken: FloatProperty(name="Darken", default=0.5, min=0.0, max=1.0, update=_v("darken"))
 
 
+class RWDetail(bpy.types.PropertyGroup):
+    """Edge Detail (PRD v2.1 EDG-1..EDG-7). Strength 0 is off: the stage has no nodes at all."""
+    mode: EnumProperty(name="Mode", items=DETAIL_MODE_ITEMS, default="ERODE", update=_struct)
+    source: EnumProperty(name="Source", items=DETAIL_SOURCE_ITEMS, default="LAYER_GRUNGE", update=_struct)
+    strength: FloatProperty(name="Strength", default=0.0, min=0.0, max=1.0, update=_v("strength"),
+                            description="How much the detail decides the edge (0: off, no nodes)")
+    width: FloatProperty(name="Edge Width", default=0.05, min=0.01, max=0.5, update=_v("width"),
+                         description="Softness of the final edge: small is hard")
+    threshold: FloatProperty(name="Threshold", default=0.5, min=0.0, max=1.0, update=_v("threshold"),
+                             description="Shifts the boundary in or out")
+    contrast: FloatProperty(name="Detail Contrast", default=0.0, min=-1.0, max=1.0, update=_v("contrast"))
+    invert: BoolProperty(name="Invert Detail", default=False, update=_v("invert"))
+    protect: BoolProperty(name="Protect Interior", default=True, update=_v("protect"),
+                          description="Keep the solid middle of a stroke whole; only its boundary breaks up")
+    image: PointerProperty(name="Grunge", type=bpy.types.Image, update=_struct,
+                           description="Layer Grunge source (and the fallback when the base has no height)")
+    scale: FloatProperty(name="Scale", default=0.25, min=0.001, soft_max=10.0, subtype="DISTANCE",
+                         update=_v("scale"), description="Grunge tile size in metres")
+    rotation: FloatProperty(name="Rotation", default=0.0, subtype="ANGLE", update=_v("rotation"))
+    offset: FloatProperty(name="Offset", default=0.0, update=_v("offset"))
+    cubic: BoolProperty(name="Cubic", default=False, update=_struct,
+                        description="Cubic interpolation: magnified grunge stays smooth in extreme close-ups")
+
+
 class RWLayer(bpy.types.PropertyGroup):
     id: StringProperty(name="ID", default="", description="Stable id used in node names")
     name: StringProperty(name="Name", default="Layer")
@@ -217,6 +256,7 @@ class RWLayer(bpy.types.PropertyGroup):
     water: PointerProperty(type=RWWater)
     damage: PointerProperty(type=RWDamage)
     decal: PointerProperty(type=RWDecal)
+    detail: PointerProperty(type=RWDetail)
 
 
 class RW_MaterialProps(bpy.types.PropertyGroup):
@@ -235,6 +275,18 @@ class RW_MaterialProps(bpy.types.PropertyGroup):
     view_channel: EnumProperty(name="View", items=[("MASK", "Mask", ""), ("COLOR", "Colour", "")], default="MASK",
                                update=_struct, description="Internal: Mask View shows the mask or the layer colour")
     baked: BoolProperty(name="Baked", default=False)
+    # v2.1
+    v21: BoolProperty(name="v2.1 Defaults", default=False,
+                      description="New layers get the v2.1 Edge Detail defaults (set by Setup or Apply v2.1 Defaults)")
+    base_height_kind: StringProperty(name="Base Height", default="",
+                                     description="IMAGE, SOCKET or NONE: what the base's height is (captured)")
+    base_height_image: StringProperty(name="Base Height Image", default="")
+    base_height_lo: FloatProperty(name="Height Low", default=0.0, update=_mat_v("base_height_lo"),
+                                  description="Base height that maps to 0 (2nd percentile at capture)")
+    base_height_hi: FloatProperty(name="Height High", default=1.0, update=_mat_v("base_height_hi"),
+                                  description="Base height that maps to 1 (98th percentile at capture)")
+    detail_split: BoolProperty(name="Before / After", default=False, update=_struct,
+                               description="Mask View shows the mask before (left half of the view) and after (right half) Edge Detail")
 
 
 class RW_ObjectProps(bpy.types.PropertyGroup):
@@ -289,7 +341,7 @@ def prefs():
     return addon.preferences if addon else None
 
 
-_classes = (RWChannel, RWIngredient, RWWater, RWDamage, RWDecal, RWLayer, RW_MaterialProps, RW_ObjectProps,
+_classes = (RWChannel, RWIngredient, RWWater, RWDamage, RWDecal, RWDetail, RWLayer, RW_MaterialProps, RW_ObjectProps,
             RW_SceneProps, RW_Preferences)
 
 

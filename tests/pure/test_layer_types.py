@@ -71,3 +71,34 @@ def test_levels_low_softness_is_crisp(m, t):
 def test_opacity_scales_and_mask_stays_in_range(P, paint, a, op):
     v = LT.mask_formula(P, paint, a, 1.0, 0.0, 0.5, 1.0, op)
     assert 0.0 <= v <= op + 1e-9
+
+
+# ------------------------------------------------------------------ v2.1 Edge Detail defaults
+def test_detail_defaults_are_valid():
+    import os
+    grunges = os.path.join(os.path.dirname(__file__), "..", "..", "realworn", "assets", "grunges")
+    for kind in LT.ORDER:
+        d = LT.detail_defaults(kind)
+        assert d["mode"] in LT.DETAIL_MODES and d["source"] in LT.DETAIL_SOURCES, kind
+        assert 0.0 <= d["strength"] <= 1.0 and 0.01 <= d["width"] <= 0.5, kind
+        if d["strength"] > 0:
+            assert os.path.exists(os.path.join(grunges, d["grunge"] + ".png")), (kind, d["grunge"])
+    for kind in ("PAINT", "DECAL", "CUSTOM"):
+        assert LT.detail_defaults(kind)["strength"] == 0.0  # PRD v2.1 table: off
+
+
+def test_edge_detail_reference_behaviour():
+    # Erode: solid stroke over a white detail stays, over a black detail is pushed out
+    assert LT.edge_detail("ERODE", 1.0, 1.0, 0.8, 0.05) == 1.0
+    assert LT.edge_detail("ERODE", 1.0, 0.0, 0.8, 0.05) == 0.0
+    # Protect Interior keeps the solid middle whatever the detail
+    assert LT.edge_detail("ERODE", 1.0, 0.0, 0.8, 0.05, protect=True) == 1.0
+    # Height Compare fills low spots first and never fills where nothing was painted
+    assert LT.edge_detail("HEIGHT", 0.8, 0.1, 0.7, 0.05) == 1.0
+    assert LT.edge_detail("HEIGHT", 0.8, 0.9, 0.7, 0.05) == 0.0
+    assert LT.edge_detail("HEIGHT", 0.0, 0.0, 0.7, 0.05) == 0.0
+    # Burn: white detail leaves the mask, dark detail burns it out
+    assert LT.edge_detail("BURN", 0.9, 1.0, 1.0, 0.05) == 1.0
+    assert LT.edge_detail("BURN", 0.9, 0.05, 1.0, 0.05) == 0.0
+    # Edge Width: the transition is at most w wide in e
+    assert 0.0 < LT.edge_detail("ERODE", 0.5, 1.0, 0.8, 0.2) < 1.0

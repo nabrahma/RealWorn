@@ -35,7 +35,7 @@ def test_library_has_twenty_tileable_grunges():
 def test_load_is_non_color_and_reused(empty_scene):
     a = grunge.load("spots_medium")
     b = grunge.load("spots_medium.png")
-    assert a is b and a.colorspace_settings.name == "Non-Color" and tuple(a.size) == (512, 512)
+    assert a is b and a.colorspace_settings.name == "Non-Color" and tuple(a.size) == (gen_grunges.SIZE, gen_grunges.SIZE)
     with pytest.raises(KeyError):
         grunge.load("no_such_grunge")
 

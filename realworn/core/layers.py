@@ -57,6 +57,9 @@ def apply_defaults(layer, kind):
     if kind == "DAMAGE":
         from . import damage
         damage.set_inner(layer)
+    from . import detail
+    if detail.wants_defaults(layer.id_data):  # v2.1 materials: per-type Edge Detail (EDG-9)
+        detail.apply_defaults(layer, kind)
 
 
 def add_layer(mat, kind="CUSTOM", name=None, index=None):

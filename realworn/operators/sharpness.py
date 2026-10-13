@@ -44,7 +44,29 @@ class RW_OT_fix_anisotropic(bpy.types.Operator):
         return {"FINISHED"}
 
 
-_classes = (RW_OT_fix_texture_limit, RW_OT_fix_simplify_textures, RW_OT_fix_anisotropic)
+class RW_OT_apply_v21_defaults(bpy.types.Operator):
+    """Give every layer of this material the v2.1 Edge Detail defaults for its type (and capture the
+    base height). v2.0 files look exactly as before until this is clicked"""
+    bl_idname = "realworn.apply_v21_defaults"
+    bl_label = "Apply v2.1 Defaults"
+    bl_options = {"REGISTER", "UNDO"}
+
+    material: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        from ..core import detail
+        from .common import resolve_material
+        _, mat = resolve_material(context, material_name=self.material)
+        if mat is None or not mat.realworn.applied:
+            self.report({"WARNING"}, "Select a set-up object")
+            return {"CANCELLED"}
+        n = detail.apply_v21_defaults(mat)
+        self.report({"INFO"}, "{}: v2.1 defaults on {} layer(s), base height {}".format(
+            mat.name, n, mat.realworn.base_height_kind.lower()))
+        return {"FINISHED"}
+
+
+_classes = (RW_OT_fix_texture_limit, RW_OT_fix_simplify_textures, RW_OT_fix_anisotropic, RW_OT_apply_v21_defaults)
 
 
 def register():
