@@ -8,6 +8,7 @@ dist/
 scratch/
 *.blend1
 .pytest_cache/
+.hypothesis/
 
 # planning documents (kept private)
 PRD*.md
