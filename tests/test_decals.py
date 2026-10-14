@@ -1,4 +1,4 @@
-"""R3: Decals (DEC-1..DEC-8): the transparent RGBA image, the Stencil brush and decal library with
+"""Decals (DEC-1..DEC-8): the transparent RGBA image, the Stencil brush and decal library with
 categories, Erase Alpha, Normal and Darken blends, Breakup on decals, the px-per-metre readout."""
 
 import os

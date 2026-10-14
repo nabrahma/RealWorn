@@ -1,4 +1,4 @@
-"""R1: Load Texture (LT-1..LT-5), box mapping everywhere (SET-3), Bump by default (SET-4), Variation
+"""Load Texture (LT-1..LT-5), box mapping everywhere (SET-3), Bump by default (SET-4), Variation
 layers (VAR-1..VAR-3), and the mask recipe rendered against its pure-Python reference (MSK-1)."""
 
 import os
@@ -144,7 +144,7 @@ def test_library_and_recent(empty_scene, tmp_path):
 
 
 def test_load_texture_operator_and_time(wall):
-    """LT-1 via the operator; the PRD budget is under 1 s for a 2K set."""
+    """LT-1 via the operator; the budget is under 1 s for a 2K set."""
     ob, mat = wall
     folder = write_set(os.path.join(OUT, "sets", "big_2k_1m"), ["big_diff_2k.png", "big_rough_2k.png",
                                                                "big_disp_2k.png"], size=2048, value=0.4)

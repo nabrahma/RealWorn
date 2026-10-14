@@ -1,4 +1,4 @@
-"""Stateful property test (PRD v3 "Other required suites"; Hypothesis RuleBasedStateMachine).
+"""Stateful property test.
 
 Random sequences of add (kind and preset), delete, move, hide, content and value changes, load and
 swap a texture, synthetic paint, duplicate, compile, save and reload, remove and re-setup, across

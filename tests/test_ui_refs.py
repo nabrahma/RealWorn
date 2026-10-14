@@ -1,6 +1,5 @@
 """The sidebar can't be drawn headless, so check what it references instead: every icon name is a
-real Blender icon and every operator it calls is registered (except those of later milestones,
-listed here until they land; the list must be empty at R5)."""
+real Blender icon and every operator it calls is registered."""
 
 import os
 import re
@@ -10,7 +9,7 @@ import bpy
 from realworn.core import kinds as K
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NOT_YET = set()  # every operator the UI references must exist (R5)
+NOT_YET = set()  # every operator the UI references must exist
 
 
 def _sources():

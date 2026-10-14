@@ -1,9 +1,9 @@
-"""The layer compiler: material.realworn.layers -> RW_Stack::<material> (PRD v3 "Architecture").
+"""The layer compiler: material.realworn.layers -> RW_Stack::<material>.
 
 Rules
 - compile(mat) rebuilds the group's contents from scratch, Base first, then the layers bottom to
   top. Same data, same tree: nodes are named RW::<layer_id>::<role> and placed by code.
-- The tree is the tutorial's, labelled: box-mapped Image Textures (Object coordinates, Mapping,
+- The tree uses standard Blender nodes, labelled: box-mapped Image Textures (Object coordinates, Mapping,
   Box projection Blend 0.3), Hue/Saturation for Tint Below, and per layer the mask recipe as real
   Color Ramp and Mix (Subtract) nodes (MSK-1), framed and named after the layer.
 - Channel mixing into one Principled BSDF: every layer blends Base Color, Roughness and Metallic by
@@ -27,7 +27,7 @@ from ..builders._dsl import SOCKET_TYPES, Tree
 _suspended = set()
 SOURCE_VIEW = {}  # material name -> layer id: Mask View shows that layer's raw source (Bake Edges and AO)
 COMPILES = {"count": 0}  # tests read this to prove value edits do not recompile
-BOX_BLEND = 0.3          # SET-3: the tutorial's Box projection blend
+BOX_BLEND = 0.3          # SET-3: the classic Box projection blend
 _LAYER_PATH = re.compile(r"^realworn\.layers\[(\d+)\](?:\.(texture))?$")
 
 
@@ -359,13 +359,13 @@ def content(b, layer, cur):
             out["metallic"] = 0.0
         return out
     if c == "TINT_BELOW":
-        # the tutorial's trick: a copy of the Base material, recoloured with Hue/Saturation (its
+        # the classic trick: a copy of the Base material, recoloured with Hue/Saturation (its
         # roughness and metallic come along); layers in between do not show through
         base = b.base_channels
         out["color"] = _hsv(b, "hsv", base["Base Color"], layer.hue, layer.saturation, layer.value)
         out["roughness"], out["metallic"] = base["Roughness"], base["Metallic"]
         return out
-    # COLOR (and TEXTURE with nothing loaded yet): the tutorial's plain BSDF
+    # COLOR (and TEXTURE with nothing loaded yet): the classic plain BSDF
     out["color"] = _hsv(b, "hsv", b.rgb_node("color", layer.color), layer.hue, layer.saturation, layer.value)
     out["roughness"] = b.value_node("rough", layer.roughness)
     out["metallic"] = 0.0

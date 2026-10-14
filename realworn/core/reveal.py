@@ -1,6 +1,6 @@
 """Reveal's True depth (REV-5): the material switches to Displacement and Bump and the objects get
 an adaptive Simple subdivision (Cycles dices it; EEVEE uses the fixed viewport level). Off by
-default, as in the tutorial. Turning it off restores the material's own displacement method and
+default. Turning it off restores the material's own displacement method and
 removes the modifier."""
 
 import bpy

@@ -1,10 +1,11 @@
-"""The reference wall: a weathered building wall material built by hand with plain Blender nodes. No RealWorn code is imported here.
+"""The reference wall: a weathered building wall material built by hand with plain Blender
+nodes. No RealWorn code is imported here.
 
 This file defines what "correct" means for RealWorn v3: never change it to
 make RealWorn pass. RealWorn rebuilds the same look with its own operators and sliders
-(tests/test_v3_reference.py) and the two renders are compared.
+(tests/test_reference_wall.py) and the two renders are compared.
 
-The tree, step by step (the tutorial's pipeline in the PRD's default stack order):
+The tree, step by step (in RealWorn's default stack order):
 
   base       Red Plaster Weathered: Object coordinates, Mapping (scale in metres), Image Texture
              with Box projection, Blend 0.3; Displacement node, material set to Bump
@@ -23,12 +24,12 @@ The tree, step by step (the tutorial's pipeline in the PRD's default stack order
 
 Cycles note: a Mix Shader tree of 10 Principled BSDFs reserves 120 closures (12 each), over Cycles'
 limit of 64, and Cycles warns. At render time zero-weight branches are skipped, so only points
-where many layer edges overlap can lose closures (checked in R0: a fully opaque decal over all
-other steps renders). This is the tutorial's method and its known cost; RealWorn mixes channels
+where many layer edges overlap can lose closures (checked: a fully opaque decal over all
+other steps renders). This is the reference's method and its known cost; RealWorn mixes channels
 into one Principled instead.
 
 Masks and the decal image are written with NumPy as functions of the surface position, through a
-paint UV made the tutorial's way (Cube Projection, then Pack Islands).
+paint UV made the reference's way (Cube Projection, then Pack Islands).
 """
 
 import os
@@ -43,13 +44,13 @@ PAINT_UV = "RW_Paint"
 
 STEPS = ("base", "second", "variations", "paint", "edges", "reveal", "decals", "dirt")
 SETS = {"base": "red_plaster_weathered", "second": "beige_wall_001", "under": "plaster_grey_04"}
-SET_SCALE = 2.0      # metres per texture tile (the tutorial's Value node)
+SET_SCALE = 2.0      # metres per texture tile (the reference's Value node)
 BUMP = 0.02          # Displacement node Scale in metres (height maps are 0..1, midlevel 0.5)
 BOX_BLEND = 0.3
 CUBE_SIZE = 1.0      # Cube Projection
 PACK_MARGIN = 0.004  # Pack Islands
 
-# Every look value is set by hand, as the tutorial does with its sliders and Color Ramps.
+# Every look value is set by hand, as the reference does with its sliders and Color Ramps.
 # Grunge Color Ramps: white stop at `white`, black stop at `black` (factor 1 where the grunge is dark).
 SECOND = dict(grunge="smudge.png", size=1.5, offset=0.0, white=0.03, black=0.13)
 VARIATIONS = (
@@ -170,7 +171,7 @@ def _separate_projections(me, uv_name):
 
 
 def paint_uv(obj, name=PAINT_UV):
-    """The tutorial's paint UV: Cube Projection, then Pack Islands, into a new UV map (with the
+    """The reference paint UV: Cube Projection, then Pack Islands, into a new UV map (with the
     projection directions moved apart first, so packing never keeps an overlap)."""
     me = obj.data
     me.uv_layers.active = me.uv_layers.new(name=name)
@@ -429,7 +430,7 @@ def _mix_float(T, fac, a, b):
 
 def build_material(obj, images=None, upto="dirt", skip=()):
     """The reference material on `obj`, built up to and including step `upto` (STEPS), leaving out
-    the steps in `skip` (a milestone that compares up to the damage step before edge wear exists).
+    the steps in `skip` (a stage that compares up to the damage step, before edge wear).
     `images`: {'paint', 'reveal', 'decal'} bpy images (sampled through the paint UV)."""
     last = STEPS.index(upto)
     on = lambda step: STEPS.index(step) <= last and step not in skip  # noqa: E731

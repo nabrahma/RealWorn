@@ -2,7 +2,7 @@
 
 Setup: validate the mesh; give an object without a material RW_<object> (a neutral grey Base);
 make materials used by other objects unique to this object (<name>.RW); add the RW_Paint UV map
-the tutorial's way (Cube Projection, then Pack Islands; Smart UV or a copy of the existing UV as
+the classic way (Cube Projection, then Pack Islands; Smart UV or a copy of the existing UV as
 options) without touching the user's UV maps; wrap every material (injector.inject) with an empty,
 invisible stack. Unapplied object scale is reported (SET-5): the operator offers to apply it,
 since Object texture coordinates follow the object's scale.
@@ -22,7 +22,7 @@ import bpy
 
 from . import ctx, injector, naming
 
-CUBE_SIZE = 1.0       # SET-2: Cube Projection (the tutorial's settings)
+CUBE_SIZE = 1.0       # SET-2: Cube Projection (the classic settings)
 PACK_MARGIN = 0.004   # Pack Islands margin (about 8 px at 2048)
 SCALE_TOL = 1e-4
 

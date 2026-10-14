@@ -25,7 +25,7 @@ def setup(scene, engine="CYCLES", samples=16, res=(128, 128), denoise=False):
 def use_gpu(scene):
     """Render `scene` on the GPU (OptiX, else CUDA). Returns the device name, or None (stays on CPU).
     Correctness tests stay on CPU: their references were rendered there and CPU is deterministic;
-    performance tests use the GPU the owner renders with."""
+    performance tests use the GPU you render with."""
     cp = bpy.context.preferences.addons["cycles"].preferences
     for kind in ("OPTIX", "CUDA"):
         try:

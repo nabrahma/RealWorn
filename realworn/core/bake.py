@@ -1,7 +1,7 @@
 """Baking through RW_Paint: Bake Material, Export Textures, and Bake Edges and AO (ENG-2).
 
 Pattern from Ucupaint (bake_common.remember_before_bake / recover_bake_settings, see
-docs/reference_notes.md; no code copied): remember everything a bake touches (engine, samples,
+THIRD_PARTY.md; no code copied): remember everything a bake touches (engine, samples,
 selection, active object, active UV), bake with the RW_Paint UV map, restore all of it, and fall
 back from GPU to CPU if a GPU bake raises.
 """
@@ -75,7 +75,7 @@ def run(scene, obj, mats, img, bake_type="EMIT", samples=4, margin=8):
     scene.cycles.samples = samples
     # In an interactive session Blender 5.2.1 bakes nothing into an image larger than the render
     # tile (default 2048 px): the bake reports success and leaves the image black. Headless bakes
-    # are fine. A tile as large as the image works around it (found in v3 R4, live).
+    # are fine. A tile as large as the image works around it (found in an interactive session).
     scene.cycles.tile_size = max(scene.cycles.tile_size, max(img.size))
     scene.cycles.use_denoising = False
     obj.hide_render = False

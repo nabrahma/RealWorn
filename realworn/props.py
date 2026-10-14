@@ -1,5 +1,5 @@
 """PropertyGroups: the v3 layer data model (material.realworn.layers) plus object, scene and add-on
-preferences (PRD v3 "Layer data").
+preferences.
 
 The layer list is the source of truth. Every property's update callback is one of two kinds:
 VALUE writes straight into the matching node of RW_Stack::<material> (no recompile, no EEVEE
@@ -15,18 +15,18 @@ from .core import kinds as K
 KIND_ITEMS = [(k, K.label(k), "New {} layer".format(K.label(k)), K.INFO[k]["icon"], i)
               for i, k in enumerate(K.KINDS)]
 CONTENT_ITEMS = [("TEXTURE", "Texture", "A loaded texture set, box mapped"),
-                 ("TINT_BELOW", "Tint Below", "A recoloured copy of the Base (the tutorial's duplicated material with "
+                 ("TINT_BELOW", "Tint Below", "A recoloured copy of the Base (the classic duplicated material with "
                                               "Hue/Saturation): its texture shows, the layers in between do not"),
                  ("COLOR", "Color", "A flat colour with roughness (a plain BSDF)")]
-SOURCE_ITEMS = [("LIVE", "Live", "The tutorial's Bevel / AO nodes, evaluated in Cycles"),
+SOURCE_ITEMS = [("LIVE", "Live", "The classic Bevel / AO nodes, evaluated in Cycles"),
                 ("BAKED", "Baked", "Baked to an image on RW_Paint: looks the same in EEVEE, renders faster")]
 DECAL_BLEND_ITEMS = [("NORMAL", "Normal", "Graffiti and stickers keep their own colour"),
                      ("DARKEN", "Darken", "Drips, dirt and mold multiply the surface below; its texture stays visible")]
-UV_ITEMS = [("CUBE", "Cube Projection", "Cube Projection then Pack Islands (the tutorial's way; buildings, props)"),
+UV_ITEMS = [("CUBE", "Cube Projection", "Cube Projection then Pack Islands (the classic way; buildings, props)"),
             ("SMART", "Smart UV", "Smart UV Project (organic shapes)"),
             ("EXISTING", "Use Existing", "Copy the object's own UV map (clean, non-overlapping layouts)")]
 RES_ITEMS = [(str(r), str(r), "") for r in (256, 512, 1024, 2048, 4096)]
-DECAL_RES_ITEMS = [("2048", "2K", ""), ("4096", "4K", "The tutorial's size"), ("8192", "8K", "Large buildings")]
+DECAL_RES_ITEMS = [("2048", "2K", ""), ("4096", "4K", "Recommended"), ("8192", "8K", "Large buildings")]
 EXPORT_ITEMS = [("UNITY_URP", "Unity URP", "BaseMap, MetallicSmoothness, Normal (OpenGL)"),
                 ("UNITY_HDRP", "Unity HDRP", "BaseColor, MaskMap (M, AO, Detail, Smoothness), Normal (OpenGL)"),
                 ("UNREAL", "Unreal ORM", "BaseColor, ORM (AO, Rough, Metal), Normal (DirectX)"),
@@ -114,7 +114,7 @@ class RWTextureSet(bpy.types.PropertyGroup):
                                    description="Kept for the texture set; box mapping has no tangents, so relief "
                                                "comes from the height map (Bump Strength)")
     bump: FloatProperty(name="Bump Strength", default=0.02, min=0.0, soft_max=0.2, subtype="DISTANCE",
-                        update=_v("bump"), description="The tutorial's Displacement Scale: metres of height "
+                        update=_v("bump"), description="Displacement Scale: metres of height "
                                                        "over the height map's 0..1")
 
     def loaded(self):

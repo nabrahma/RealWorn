@@ -1,16 +1,16 @@
-"""PRD v3 performance budgets, on the GPU (OptiX when present), on the reference wall.
+"""Performance budgets, on the GPU (OptiX when present), on the reference wall.
 
-The reference stack for timing is the tutorial's: Base, three Variations, one Paint, one Reveal,
+The reference stack for timing: Base, three Variations, one Paint, one Reveal,
 one Decals layer. Overhead is measured against the Base alone (the same wall with only its texture
 set loaded), with Cycles defaults (adaptive sampling, up to 1024 spp) and at a fixed 1024 spp,
 best of 3 renders each:
 
   reference stack                               budget +40% (v2.1: about +90%, 4 layers)
-  + Edge Wear and Dirt, Baked                   (the PRD's budgeted case: "Edge Wear and Dirt Baked")
+  + Edge Wear and Dirt, Baked                   (the budgeted case)
   + Edge Wear and Dirt, Live                    measured and reported (Bevel and AO cost rays)
   after Bake Material                           budget +15% (v2.1: +30% to +32%)
 
-Misses are recorded with real numbers in docs/perf.md, not relaxed.
+Misses are recorded with real numbers in tests/_out/perf.md, not relaxed.
 """
 
 import os
@@ -102,11 +102,11 @@ def test_cycles_overhead_reference_stack(empty_scene, out_dir):
              for k in sorted(ov)) if b is not None and v > b]
     assert ov["stack", "default"] < 120 and ov["baked", "default"] < 60, "regression"
     if over:
-        pytest.xfail("over PRD v3 budget: " + ", ".join(over))
+        pytest.xfail("over budget: " + ", ".join(over))
 
 
 def realworn_look_layers(wall):
-    """The tutorial's reference stack on top of the Base: second material and two more variations
+    """The reference stack on top of the Base: second material and two more variations
     (three Variations in all), Paint, Reveal, Decals, with their masks."""
     realworn_look(wall, "decals", skip=("edges",), base=False)
     write_masks(wall)
@@ -135,8 +135,8 @@ def test_mask_memory_reference_stack(empty_scene):
     assert mb < 180
 
 
-def test_tutorial_tree_overhead_for_context(empty_scene, out_dir):
-    """Context for the budget: the same look built the tutorial's way (the reference fixture's Mix
+def test_hand_built_tree_overhead_for_context(empty_scene, out_dir):
+    """Context for the budget: the same look built the reference's way (the reference fixture's Mix
     Shader tree), timed the same way against its own base alone. No budget: this is what the look
     itself costs."""
     sc = empty_scene
@@ -152,8 +152,8 @@ def test_tutorial_tree_overhead_for_context(empty_scene, out_dir):
     R.build_material(wall, imgs, upto="decals", skip=("edges",))
     stack = _measure(sc, out_dir, "tut_stack")
     ov = {m: (stack[m] - base[m]) / base[m] * 100 for m in ("default", "fixed")}
-    print("\n[tutorial tree] {}: base {:.2f} s / {:.2f} s; stack +{:.0f}% defaults, +{:.0f}% fixed".format(
+    print("\n[reference tree] {}: base {:.2f} s / {:.2f} s; stack +{:.0f}% defaults, +{:.0f}% fixed".format(
         device, base["default"], base["fixed"], ov["default"], ov["fixed"]))
-    record("v3 context: the tutorial's own Mix Shader tree, same stack, GPU defaults", ov["default"], "%", None,
+    record("v3 context: the reference's own Mix Shader tree, same stack, GPU defaults", ov["default"], "%", None,
            "reference fixture, best of 3, {}; RealWorn's channel mixing compared against this".format(device))
-    record("v3 context: the tutorial's own Mix Shader tree, same stack, GPU fixed 1024 spp", ov["fixed"], "%", None, "")
+    record("v3 context: the reference's own Mix Shader tree, same stack, GPU fixed 1024 spp", ov["fixed"], "%", None, "")

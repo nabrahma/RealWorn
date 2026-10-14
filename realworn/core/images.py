@@ -4,13 +4,13 @@ MSK-3  one image per painted layer, RW_<object>_<layer>_mask on RW_Paint: 2048 p
        the object's largest dimension, a power of two clamped 1024..4096, 8-bit. Reveal masks are
        float so Depth has no stepping (Blender keeps float images at 32 bits in memory; they are
        stored as half-float EXR in PNG mode). Masks start black: nothing painted.
-DEC-1  a Decals layer's image is RGBA, created fully transparent (alpha 0, the tutorial's key
+DEC-1  a Decals layer's image is RGBA, created fully transparent (alpha 0, the key
        setting); DEC-2 4096 px by default (2048 and 8192 options).
        Resize and Upgrade Mask keep the paint (bicubic).
 SAV-1  created packed by default; preference PNG writes //textures/realworn/<object>/<image>.png.
 SAV-2  save_pre handler: every dirty RealWorn image is packed or written before the file saves
        (pattern from Ucupaint image_ops.save_pack_all and Paint System image.save_image, see
-       docs/reference_notes.md; no code copied).
+       THIRD_PARTY.md; no code copied).
 """
 
 import math

@@ -9,3 +9,5 @@ scratch/
 *.blend1
 .pytest_cache/
 
+# planning documents (kept private)
+PRD*.md

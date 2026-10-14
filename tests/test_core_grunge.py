@@ -1,5 +1,5 @@
-"""Libraries and brushes (kept from v2; PRD v3 PNT-3, PNT-5, PNT-6 and the Brush settings suite):
-the generated grunge library, loading, and RealWorn's three brushes with the tutorial's exact
+"""Libraries and brushes:
+the generated grunge library, loading, and RealWorn's three brushes with the reference's exact
 settings, read back from the brush assets."""
 
 import os
@@ -45,7 +45,7 @@ def test_soft_brush(empty_scene):
     assert b.mask_texture is None and b.texture is None
 
 
-def test_damage_brush_has_the_tutorials_settings(empty_scene):
+def test_damage_brush_settings(empty_scene):
     """REV-3: Texture Mask from the damage alpha, Mask Mapping View Plane, Rake on, Falloff Constant."""
     path = grunge.path_of("grunges", "chips_large.png")  # any image works as an alpha
     b = grunge.set_damage_alpha(path)
@@ -57,7 +57,7 @@ def test_damage_brush_has_the_tutorials_settings(empty_scene):
     assert b.curve_distance_falloff_preset == "CONSTANT"
 
 
-def test_stencil_brush_has_the_tutorials_settings(empty_scene):
+def test_stencil_brush_settings(empty_scene):
     """DEC-3: Texture from the decal, Mapping Stencil, Image Aspect applied, Override Overlay on."""
     img = bpy.data.images.new("wide_decal", 400, 100, alpha=True)
     img.filepath_raw = os.path.join(bpy.app.tempdir, "wide_decal.png")

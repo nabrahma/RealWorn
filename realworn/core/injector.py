@@ -10,7 +10,7 @@ Roughness, Metallic, Normal) and the Principled inputs. Materials without a Prin
 Principled overlay mixed in by the stack's Coverage output (SHADER mode).
 
 Height (SET-4): the stack's one shared height (metres) feeds an owned Displacement node (Midlevel
-0, Scale 1) on the Material Output, the tutorial's Displacement node with the material on Bump.
+0, Scale 1) on the Material Output, the classic Displacement node with the material on Bump.
 It is added to the material's own displacement, or replaces it once a texture set is loaded onto
 the Base (the set is then the base look).
 

@@ -1,4 +1,4 @@
-"""Core (kept from v2, PRD v3 G6 and success criterion 3): Setup / Remove round trips, the empty
+"""Core: Setup / Remove round trips, the empty
 stack invisible to the pixel, compiler determinism, value edits without recompiling, lean compile,
 layer list editing with default stack positions, and the v3 Setup changes (RW_<object>, Cube
 Projection and Pack Islands, the scale check)."""
@@ -236,8 +236,8 @@ def _face_uv_areas(ob):
     return np.sort(np.asarray(out))
 
 
-def test_cube_projection_matches_the_tutorial_fixture(empty_scene):
-    """Setup's paint UV is the tutorial's (the reference fixture's, made by hand): every face gets the
+def test_cube_projection_matches_the_reference_fixture(empty_scene):
+    """Setup's paint UV matches the reference fixture's (made by hand): every face gets the
     same UV area, so the same texel density, with no overlap. Pack Islands may place equal islands
     in different slots depending on the window context, so positions are not compared."""
     from fixtures import reference_wall as R

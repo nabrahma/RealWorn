@@ -1,7 +1,7 @@
 """REF-2: the reference wall built with RealWorn operators and sliders only (the other half of the
-reference test). Shared by tests/test_v3_reference.py and the performance tests.
+reference test). Shared by tests/test_reference_wall.py and the performance tests.
 
-The look values come from the reference fixture; the conversions below turn the tutorial's Color
+The look values come from the reference fixture; the conversions below turn the reference's Color
 Ramp stops into RealWorn's Threshold and Sharpness sliders (the mask recipe, kinds.py).
 """
 
@@ -96,13 +96,13 @@ def realworn_look(wall, upto, skip=(), base=True):
         ly.texture.bump = R.BUMP
         ly.depth_mm = R.REVEAL["depth"] * 1000.0
         ly.threshold, ly.sharpness = ramp_stops_sliders(R.REVEAL["black"], R.REVEAL["white"])
-        ly.edge_dark = 0.0  # REV-6 is RealWorn's one extra over the tutorial
+        ly.edge_dark = 0.0  # REV-6 is RealWorn's one extra over the reference
         ly.mask_res = 2048
     if on("edges"):  # Bevel . Normal through a ramp; the grunge through a Map Range into the radius
         bpy.ops.realworn.layer_add(material=m, kind="EDGE_WEAR")
         ly = _layer(mat)
         h, s_, v_ = R.EDGES["hsv"]
-        ly.content = "TINT_BELOW"  # the tutorial's lighter, less saturated copy of the base
+        ly.content = "TINT_BELOW"  # the reference's lighter, less saturated copy of the base
         ly.hue, ly.saturation, ly.value = h - 0.5, s_ - 1.0, v_ - 1.0
         lo, hi = R.EDGES["radius"]
         ly.width_mm, ly.breakup_amount = hi * 1000.0, 1.0 - lo / hi

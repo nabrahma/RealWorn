@@ -1,4 +1,4 @@
-"""v0.7 files (PRD v2 "Schema version bump"): the clean Remove path.
+"""v0.7 files: the clean Remove path.
 
 v0.7 weathered materials still carry their snapshot (same format) under the same property names
 (applied, snapshot, schema_version 1), so the original tree is restored exactly. Everything else
@@ -95,7 +95,7 @@ def _v2_decal(empty):
     return bool(empty.get("rw_v2_decal"))
 
 
-# ================================================================ v2.x files (PRD v3 "Migration")
+# ================================================================ v2.x files
 V2_ORDER = ("DIRT", "DUST", "RUST", "WEAR", "SCRATCHES", "WATER", "PAINT", "DAMAGE", "DECAL", "CUSTOM")
 V2_MODIFIERS = ("RW_Masks", "RW_Damage", "RW_DisplaceSubdiv")
 # v2 type -> (v3 kind, preset): a clear match keeps the painted mask; the rest is reported
@@ -203,7 +203,7 @@ def convert_v2(mat):
     from . import assets
     assets.remove_unused_groups()  # the v2 node groups nothing uses any more
     rep.append(("INFO", "{}: converted to v3; edge and cavity helpers, Edge Lock, Edge Detail, looks and geometry "
-                        "damage are not in v3 (tag v2.1-q4 keeps them)".format(mat.name)))
+                        "damage are not in v3 (RealWorn 2.1 keeps them)".format(mat.name)))
     return rep
 
 

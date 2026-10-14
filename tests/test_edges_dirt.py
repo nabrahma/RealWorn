@@ -1,5 +1,5 @@
-"""R4: Edge Wear and Dirt (EDW-1..EDW-3, DRT-1..DRT-3) and Bake Edges and AO (ENG-1..ENG-4): the
-tutorial's Bevel and AO recipes, live controls, touch-up paint, Baked versus Live in Cycles, Baked
+"""Edge Wear and Dirt (EDW-1..EDW-3, DRT-1..DRT-3) and Bake Edges and AO (ENG-1..ENG-4): the
+reference's Bevel and AO recipes, live controls, touch-up paint, Baked versus Live in Cycles, Baked
 in EEVEE versus Baked in Cycles, and the EEVEE warning."""
 
 import os
@@ -41,7 +41,7 @@ def _layers(mat):
     return ew, dirt
 
 
-def test_recipes_are_the_tutorials_nodes(block):
+def test_recipes_use_bevel_and_ao_nodes(block):
     """EDW-1 / DRT-1: Bevel normal . Geometry normal through a ramp, the grunge through a Map Range
     into the Bevel radius; AO through a Color Ramp; ENG-4 Bevel samples 8."""
     sc, ob, mat = block

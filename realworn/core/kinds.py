@@ -1,4 +1,4 @@
-"""The six layer kinds (PRD v3 "The layer model"), their defaults and presets, and the mask recipe's
+"""The six layer kinds, their defaults and presets, and the mask recipe's
 reference math. Pure Python: no bpy, so tests/pure checks it outside Blender.
 
 Every layer is a material plus a mask. Kinds differ only in where the mask comes from:
@@ -20,10 +20,10 @@ Ramp (Breakup Contrast c: stops at c/2 and 1 - c/2), and the outer ramp has stop
 """
 
 KINDS = ("VARIATION", "PAINT", "REVEAL", "DECALS", "EDGE_WEAR", "DIRT")
-# Default stack position, bottom to top (the tutorial's order: variation over the base, paint over
+# Default stack position, bottom to top (the classic order: variation over the base, paint over
 # that, worn edges, damage breaking through, decals over the damage, dirt settling on top).
 ORDER = ("VARIATION", "PAINT", "EDGE_WEAR", "REVEAL", "DECALS", "DIRT")
-CONTENTS = ("TEXTURE", "TINT_BELOW", "COLOR")  # Tint Below: a recoloured copy of the Base (the tutorial's trick)
+CONTENTS = ("TEXTURE", "TINT_BELOW", "COLOR")  # Tint Below: a recoloured copy of the Base (the classic trick)
 
 INFO = {
     "VARIATION": {"label": "Variation", "icon": "MOD_NOISE", "paint": None},
@@ -34,8 +34,8 @@ INFO = {
     "DIRT": {"label": "Dirt", "icon": "SHADING_RENDERED", "paint": "RW Soft", "optional_paint": True},
 }
 
-# Internal recipes for the generated sources (the tutorial's fixed nodes).
-EDGE_GAIN = 10.0             # Edge Wear: S = (1 - Bevel . Normal) x 10 (the tutorial's Multiply)
+# Internal recipes for the generated sources (the classic fixed nodes).
+EDGE_GAIN = 10.0             # Edge Wear: S = (1 - Bevel . Normal) x 10 (the classic Multiply)
 AO_RAMP = (0.5, 0.95)        # Dirt: S = 1 where AO <= 0.5, 0 where AO >= 0.95 (Color Ramp)
 BEVEL_SAMPLES = 8            # ENG-4
 AO_SAMPLES = 16
@@ -81,7 +81,7 @@ PRESETS = {
 }
 
 TIPS = {
-    "VARIATION": "Keep each Variation subtle and stack several (tutorial tip)",
+    "VARIATION": "Keep each Variation subtle and stack several",
     "DECALS": "Drips start at ledges and sills, dirt collects at the bottom, graffiti sits where "
               "a person could reach",
 }

@@ -1,5 +1,4 @@
-"""The six kinds, their default stack positions and presets, and the mask recipe's reference math
-(PRD v3 "The layer model", MSK-1, VAR-2, REV-4)."""
+"""The six kinds, their default stack positions and presets, and the mask recipe's reference math."""
 
 import pytest
 from hypothesis import given
@@ -11,7 +10,7 @@ from realworn.core import kinds as K
 def test_six_kinds_and_their_order():
     assert K.KINDS == ("VARIATION", "PAINT", "REVEAL", "DECALS", "EDGE_WEAR", "DIRT")
     assert set(K.ORDER) == set(K.KINDS) and set(K.INFO) == set(K.KINDS) and set(K.DEFAULTS) == set(K.KINDS)
-    # the tutorial's order: variation over the base, paint over that, worn edges, damage breaking
+    # the reference's order: variation over the base, paint over that, worn edges, damage breaking
     # through, decals over the damage, dirt settling on top
     assert K.ORDER.index("VARIATION") < K.ORDER.index("PAINT") < K.ORDER.index("REVEAL") \
         < K.ORDER.index("DECALS") < K.ORDER.index("DIRT")
@@ -33,7 +32,7 @@ def test_breakup_defaults():
         assert K.DEFAULTS[k]["breakup_amount"] > 0.0 and K.DEFAULTS[k]["breakup"]
 
 
-def test_kind_defaults_match_the_prd():
+def test_kind_defaults():
     assert K.DEFAULTS["VARIATION"]["content"] == "TINT_BELOW"            # VAR-1
     assert K.DEFAULTS["PAINT"]["content"] == "TINT_BELOW" and K.DEFAULTS["PAINT"]["hue"] != 0  # PNT-7
     assert K.DEFAULTS["REVEAL"]["content"] == "COLOR" and K.DEFAULTS["REVEAL"]["depth_mm"] == 2.0  # REV-1, REV-2

@@ -1,4 +1,4 @@
-"""Painting (kept from v2; PRD v3 PNT-1, PNT-2, MSK-3, MSK-4, DEC-1): mask images and texel
+"""Painting: mask images and texel
 density, paint enter / exit state, Paint / Erase, Fill / Clear, Mask View, paint persistence in
 packed and PNG modes (8-bit and float), texel-to-surface (painting level 2), resize keeps paint."""
 

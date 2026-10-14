@@ -1,10 +1,10 @@
-"""While painting (PRD v3 UI-6): a small viewport overlay and a pie menu.
+"""While painting: a small viewport overlay and a pie menu.
 
 Overlay (UI-6): one line with the layer name, the brush and its shortcuts, drawn only while an
 object is in RealWorn paint mode. Pie menu: Paint, Erase, Next Layer, Previous Layer, Mask View,
 Exit. Its keymap item lives in the add-on keyconfig and is unassigned by default (key NONE)
 so it never clashes; assign a key in Preferences > Keymap (search "RealWorn Paint"). Keymaps are
-scoped to the add-on keyconfig, as Paint System does (docs/reference_notes.md).
+scoped to the add-on keyconfig, as Paint System does (THIRD_PARTY.md).
 """
 
 import json

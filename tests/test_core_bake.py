@@ -1,4 +1,4 @@
-"""Bake and safety (kept from v2; PRD v3 UI-5, G6, success criterion 3): Bake Material + Restore
+"""Bake and safety: Bake Material + Restore
 Live Stack, Export Textures with engine presets, v0.7 files cleaned, and 20 x Setup / paint /
 Remove without leftovers."""
 
@@ -127,7 +127,7 @@ def _git_v07(out_dir):
         return dst
     os.makedirs(dst, exist_ok=True)
     tar = os.path.join(out_dir, "v07.tar")
-    r = subprocess.run(["git", "-C", ROOT, "archive", "-o", tar, "v0.7", "realworn"], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", ROOT, "archive", "-o", tar, "v0.7.0", "realworn"], capture_output=True, text=True)
     if r.returncode != 0:
         return None
     import tarfile
@@ -139,7 +139,7 @@ def _git_v07(out_dir):
 def test_v07_file_is_restored_and_set_up_again(empty_scene, out_dir):
     src = _git_v07(out_dir)
     if src is None:
-        pytest.skip("git / tag v0.7 not available")
+        pytest.skip("git / tag v0.7.0 not available")
     clean, weathered = os.path.join(out_dir, "v07_clean.blend"), os.path.join(out_dir, "v07_weathered.blend")
     script = os.path.join(out_dir, "make_v07.py")
     with open(script, "w", encoding="utf-8") as fh:

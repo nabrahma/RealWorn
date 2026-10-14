@@ -1,4 +1,4 @@
-"""Damage brush alphas for RW Damage (PRD v3 REV-3, PNT-5). Original CC0 work.
+"""Damage brush alphas for RW Damage. Original CC0 work.
 
 Each alpha is a white-on-black stamp, centred, black at the border (a Texture Mask in View Plane
 mapping must not show a square), with near-crisp edges like a hand-made damage alpha:

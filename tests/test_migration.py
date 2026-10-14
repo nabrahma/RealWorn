@@ -1,5 +1,5 @@
-"""R5 Migration (PRD v3 "Other required suites"): a file painted with RealWorn v2.1 (made by the real
-v2.1 code, from git tag v2.1-q4, in a separate Blender) converts layer by layer where there is a
+"""Migration: a file painted with RealWorn v2.1 (made by the real
+v2.1 code, from git tag v2.1.0, in a separate Blender) converts layer by layer where there is a
 clear match, keeps the painted masks, reports the rest, and still Removes exactly."""
 
 import os
@@ -58,9 +58,9 @@ def _git(tag, out_dir):
 
 @pytest.fixture
 def v21_file(out_dir):
-    src = _git("v2.1-q4", out_dir)
+    src = _git("v2.1.0", out_dir)
     if src is None:
-        pytest.skip("git / tag v2.1-q4 not available")
+        pytest.skip("git / tag v2.1.0 not available")
     clean, painted = os.path.join(out_dir, "v21_clean.blend"), os.path.join(out_dir, "v21_painted.blend")
     script = os.path.join(out_dir, "make_v21.py")
     with open(script, "w", encoding="utf-8") as fh:

@@ -1,4 +1,4 @@
-"""The RealWorn sidebar tab: one short panel (PRD v3 "UI").
+"""The RealWorn sidebar tab: one short panel.
 
   Setup / Remove
   + Add: Variation | Paint | Reveal | Decals | Edge Wear | Dirt
@@ -60,7 +60,7 @@ class RW_UL_layers(bpy.types.UIList):
         row = layout.row(align=True)
         row.prop(item, "visible", text="", emboss=False, icon="HIDE_OFF" if item.visible else "HIDE_ON")
         row.label(text="", icon=K.INFO[item.kind]["icon"])
-        if not item.name.startswith(K.label(item.kind)):  # "Reveal: Damage", as in the PRD sketch
+        if not item.name.startswith(K.label(item.kind)):  # "Reveal: Damage"
             row.label(text=K.label(item.kind) + ":")
         row.prop(item, "name", text="", emboss=False)  # UI-2: double-click to rename
         note = status(context.active_object, item, context)

@@ -14,7 +14,7 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 API = "https://api.polyhaven.com"
-UA = {"User-Agent": "RealWorn-dev-test-corpus/0.7 (internal test tool)"}
+UA = {"User-Agent": "RealWorn-dev-test-corpus/0.7 (test corpus fetcher)"}
 # category -> how many assets; covers bricks, concrete, painted/rusty metal, wood, asphalt, tiles, plaster
 WANT = [("brick", 2), ("concrete", 2), ("metal", 2), ("wood", 2), ("asphalt", 1), ("tiles", 1),
         ("plaster", 1), ("cobblestone", 1)]

@@ -3,7 +3,7 @@
 Libraries: the bundled generated images in assets/<kind>/ plus the user's folder from the
 preferences; subfolders become categories (decals: Drips, Dirt, Graffiti, Stickers, Mold, Cracks).
 
-Brushes, with the tutorial's exact settings. RealWorn creates its own brush assets and never edits
+Brushes, with fixed settings. RealWorn creates its own brush assets and never edits
 the user's:
   RW Soft     default round brush, smooth falloff (Paint, Dirt touch-ups)
   RW Damage   Texture Mask from the selected damage alpha, Mask Mapping View Plane, Rake on,

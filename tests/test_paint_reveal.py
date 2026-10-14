@@ -1,4 +1,4 @@
-"""R2: Paint (PNT-7, PNT-8) and Reveal (REV-1..REV-6): Tint Below with a hue shift, Breakup, the
+"""Paint (PNT-7, PNT-8) and Reveal (REV-1..REV-6): Tint Below with a hue shift, Breakup, the
 Damage brush and its alpha library, Depth measured on a bake of the stack's height, edge
 darkening, Scratches, True depth, and no stepping in Depth (float masks)."""
 

@@ -1,4 +1,4 @@
-"""Decals for the Decals layer's Stencil brush (PRD v3 DEC-3, DEC-7). Original CC0 work.
+"""Decals for the Decals layer's Stencil brush. Original CC0 work.
 
 RGBA images (straight alpha, transparent background) in category folders, the way a user's own
 decal library is laid out:
