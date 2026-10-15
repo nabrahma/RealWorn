@@ -205,12 +205,33 @@ def add_recent(folder):
     return items
 
 
+def realindex_sets():
+    """Texture sets from the RealIndex add-on when it is enabled (its read-only api module); else []."""
+    import importlib
+    for name in bpy.context.preferences.addons.keys():
+        if name != "realindex" and not name.endswith(".realindex"):
+            continue
+        try:
+            api = importlib.import_module(name + ".api")
+            sets = api.texture_sets()
+        except Exception:
+            return []
+        out = []
+        for t in sets:
+            folder = t.get("folder")
+            if folder and os.path.isdir(folder):
+                out.append({"name": "RealIndex: " + t["name"], "path": folder, "category": "RealIndex",
+                            "thumb": t.get("preview") or t.get("maps", {}).get("color")})
+        return sorted(out, key=lambda e: e["name"].lower())
+    return []
+
+
 _previews = None
 _enum_items = []
 
 
 def library_enum_items(folder):
-    """Enum items with thumbnails: Recent first, then the library folder's sets."""
+    """Enum items with thumbnails: Recent first, then the library folder's sets, then RealIndex's."""
     global _previews
     _enum_items.clear()
     try:
@@ -227,6 +248,8 @@ def library_enum_items(folder):
                             "thumb": maps.get("color") or maps.get("height")})
             seen.add(os.path.normcase(r))
     entries += [e for e in library(folder) if os.path.normcase(e["path"]) not in seen]
+    seen |= {os.path.normcase(e["path"]) for e in entries}
+    entries += [e for e in realindex_sets() if os.path.normcase(e["path"]) not in seen]
     for i, e in enumerate(entries):
         icon = 0
         if _previews is not None and e["thumb"]:

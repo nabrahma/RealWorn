@@ -143,6 +143,11 @@ def test_library_and_recent(empty_scene, tmp_path):
     assert items[0][1].startswith("Recent: red plaster") and len(items) == 2
 
 
+def test_realindex_source_absent(empty_scene):
+    """Without the RealIndex add-on enabled the library has no RealIndex entries (and nothing fails)."""
+    assert pbrset.realindex_sets() == []
+
+
 def test_load_texture_operator_and_time(wall):
     """LT-1 via the operator; the budget is under 1 s for a 2K set."""
     ob, mat = wall
