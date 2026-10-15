@@ -15,6 +15,15 @@ def is_owned(node):
     return bool(node.get(naming.OWNED_PROP)) or naming.is_rw_name(node.name)
 
 
+def is_foreign(node):
+    """Owned by another add-on (RealDust marks its nodes rd_owned): any *_owned flag but ours."""
+    return any(k.endswith("_owned") and k != naming.OWNED_PROP and node.get(k) for k in node.keys())
+
+
+def foreign_nodes(tree):
+    return sorted(n.name for n in tree.nodes if is_foreign(n))
+
+
 def owned_nodes(tree):
     return [n for n in tree.nodes if is_owned(n)]
 

@@ -16,6 +16,13 @@ the Base (the set is then the base look).
 
 Remove deletes every owned node and restores links, defaults and layout from the snapshot, then
 checks the tree equals it.
+
+Other add-ons (3.1, RealDust): nodes another add-on owns (an *_owned flag other than rw_owned)
+are never edited or deleted. RealWorn always goes under a layer another add-on inserted at the
+Principled boundary (channel_target), so dust stays on top whatever the order. While such nodes
+exist, or existed when the material was set up, Remove is surgical: each channel is relinked from
+the stack's input source to the stack's output targets and only RealWorn's nodes are deleted; the
+whole tree is never restored from the snapshot.
 """
 
 import json
@@ -49,7 +56,8 @@ def find_principled(tree):
                 continue
             seen.add(n.name)
             if n.bl_idname == "ShaderNodeBsdfPrincipled":
-                found.append(n)
+                if not nodeutil.is_foreign(n):  # another add-on's overlay BSDF is not ours to wrap
+                    found.append(n)
             elif n.bl_idname in _PASS_THROUGH:
                 for s in n.inputs:
                     if s.type == "SHADER" or n.bl_idname == "NodeReroute":
@@ -102,13 +110,31 @@ def _new_stack(tree, mat, idx, frame, x, y):
     return stack, geom
 
 
+def channel_target(tree, principled, ch):
+    """The socket RealWorn feeds for channel `ch` of `principled`: the Principled input itself, or
+    the matching input of another add-on's layer sitting on it (3.1), so RealWorn stays under it."""
+    sock = principled.inputs[ch]
+    seen = set()
+    while True:
+        src = nodeutil.link_source(sock)
+        if src is None or not nodeutil.is_foreign(src.node) or src.node.name in seen:
+            return sock
+        seen.add(src.node.name)
+        nxt = src.node.inputs.get(ch)
+        if nxt is None:
+            return sock
+        sock = nxt
+
+
 def _inject_channel(tree, mat, principled, idx, frame):
     px, py = _abs(principled)
     stack, geom = _new_stack(tree, mat, idx, frame, px - 320, py)
     stack["rw_principled"] = principled.name  # Bake swaps and Restore Live Stack relink by this
     for ch in naming.CHANNELS:
-        pin, sin = principled.inputs[ch], stack.inputs[ch]
+        pin, sin = channel_target(tree, principled, ch), stack.inputs[ch]
         src = nodeutil.link_source(pin)
+        if src is not None and nodeutil.is_foreign(src.node):
+            src = None  # another add-on's helper (its own normal source): treat as unlinked
         if src is not None:
             tree.links.new(src, sin)
         elif ch in naming.NORMAL_CHANNELS:
@@ -160,6 +186,7 @@ def inject(mat):
     snap = snapshot.serialize(tree)
     st = mat.realworn
     st.snapshot = snapshot.dumps(snap)
+    mat["rw_foreign"] = json.dumps(nodeutil.foreign_nodes(tree))
     st.schema_version = naming.SCHEMA
     mat["rw_orig_disp"] = json.dumps(_disp_ref(tree, out))
     try:
@@ -196,6 +223,8 @@ def restore(mat):
     if not is_setup(mat):
         return []
     set_mask_view(mat, False)
+    if nodeutil.foreign_nodes(mat.node_tree) or json.loads(mat.get("rw_foreign", "[]")):
+        return _restore_surgical(mat)
     snap = snapshot.loads(mat.realworn.snapshot)
     diffs = snapshot.restore(mat.node_tree, snap)
     if not diffs:
@@ -206,9 +235,65 @@ def restore(mat):
         st.baked = False
         if "rw_orig_disp" in mat:
             del mat["rw_orig_disp"]
+        if "rw_foreign" in mat:
+            del mat["rw_foreign"]
         _drop_group(mat)
         reveal.restore(mat)
     return diffs  # on mismatch the snapshot is kept for a retry
+
+
+def _relink_around(tree, node, in_name, out_name):
+    """The input's source feeds every target of the output; RealWorn's own sources count as
+    unlinked (the target then falls back to its own default value, which RealWorn never changed)."""
+    sin, sout = node.inputs.get(in_name), node.outputs.get(out_name)
+    if sin is None or sout is None:
+        return
+    src = nodeutil.link_source(sin)
+    if src is not None and nodeutil.is_owned(src.node):
+        src = None
+    targets = [l.to_socket for l in sout.links if not nodeutil.is_owned(l.to_node)]
+    for l in list(sout.links):
+        tree.links.remove(l)
+    if src is not None:
+        for tgt in targets:
+            tree.links.new(src, tgt)
+
+
+def _restore_surgical(mat):
+    """3.1: another add-on's nodes are (or were) in the tree. Relink around RealWorn's nodes and
+    delete only those; the snapshot is not restored (it would undo the other add-on's work)."""
+    from . import bake, reveal
+    tree = mat.node_tree
+    st = mat.realworn
+    if st.baked:
+        bake.restore_live(mat)
+    for stack in stacks(tree):
+        for ch in naming.CHANNELS:
+            _relink_around(tree, stack, ch, ch)
+    mix = nodeutil.find(tree, "overlay_mix")
+    if mix is not None:
+        src = nodeutil.link_source(mix.inputs[1])
+        targets = [l.to_socket for l in mix.outputs[0].links]
+        for l in list(mix.outputs[0].links):
+            tree.links.remove(l)
+        if src is not None:
+            for tgt in targets:
+                tree.links.new(src, tgt)
+    unlink_displacement(mat)
+    for n in [n for n in tree.nodes if nodeutil.is_owned(n) and n.bl_idname != "NodeFrame"]:
+        tree.nodes.remove(n)
+    for n in [n for n in tree.nodes if nodeutil.is_owned(n)]:
+        tree.nodes.remove(n)
+    st.applied = False
+    st.snapshot = ""
+    st.mode = ""
+    st.baked = False
+    for k in ("rw_orig_disp", "rw_foreign"):
+        if k in mat:
+            del mat[k]
+    _drop_group(mat)
+    reveal.restore(mat)
+    return []
 
 
 # ------------------------------------------------- outputs outside the stack

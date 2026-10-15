@@ -261,16 +261,17 @@ def swap_to_baked(mat, images_by_key):
         x, y = injector._abs(st)
         for i, n in enumerate([uvn] + list(nodes.values()) + [nmap]):
             injector._place(n, x + 30, y + 200 + i * 40)
-        nt.links.new(nodes["base_color"].outputs["Color"], p.inputs["Base Color"])
+        tgt = {ch: injector.channel_target(nt, p, ch) for ch in naming.CHANNELS}  # 3.1: under other layers
+        nt.links.new(nodes["base_color"].outputs["Color"], tgt["Base Color"])
         for key, sock in (("roughness", "Roughness"), ("metallic", "Metallic")):
             const = constant_value(images_by_key[key])
             if const is not None:  # a flat map costs a texture lookup per sample for nothing
-                for link in list(p.inputs[sock].links):
+                for link in list(tgt[sock].links):
                     nt.links.remove(link)
-                p.inputs[sock].default_value = const
+                tgt[sock].default_value = const
             else:
-                nt.links.new(nodes[key].outputs["Color"], p.inputs[sock])
-        nt.links.new(nmap.outputs["Normal"], p.inputs["Normal"])
+                nt.links.new(nodes[key].outputs["Color"], tgt[sock])
+        nt.links.new(nmap.outputs["Normal"], tgt["Normal"])
     injector.unlink_displacement(mat)
     mat[BAKED_KEY] = json.dumps({k: img.name for k, img in images_by_key.items()})
     mat.realworn.baked = True
@@ -286,7 +287,7 @@ def restore_live(mat):
         if p is None:
             continue
         for ch in naming.CHANNELS:
-            nt.links.new(st.outputs[ch], p.inputs[ch])
+            nt.links.new(st.outputs[ch], injector.channel_target(nt, p, ch))
     mat.realworn.baked = False
     if BAKED_KEY in mat:
         del mat[BAKED_KEY]
