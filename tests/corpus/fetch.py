@@ -5,6 +5,7 @@ set is stable over time; pass --list to see the choice without downloading.
 
     python tests/corpus/fetch.py [--res 1k] [--list]
     python tests/corpus/fetch.py --reference        # v3 reference test sets
+    python tests/corpus/fetch.py --road             # the Puddle tests' reference road
 """
 
 import argparse
@@ -20,6 +21,8 @@ WANT = [("brick", 2), ("concrete", 2), ("metal", 2), ("wood", 2), ("asphalt", 1)
         ("plaster", 1), ("cobblestone", 1)]
 # v3: the sets the reference wall uses (base plaster, second material, under-material)
 REFERENCE_SETS = ["red_plaster_weathered", "beige_wall_001", "plaster_grey_04"]
+# the reference road of the Puddle tests: asphalt, cobblestones, tiles
+ROAD_SETS = ["aerial_asphalt_01", "cobblestone_floor_04", "interior_tiles"]
 
 
 def _get(url):
@@ -59,8 +62,9 @@ def main():
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--assets", nargs="*", help="fetch these asset ids instead of the category picks")
     ap.add_argument("--reference", action="store_true", help="fetch the reference wall texture sets")
+    ap.add_argument("--road", action="store_true", help="fetch the reference road texture sets (Puddle tests)")
     a = ap.parse_args()
-    picked = a.assets if a.assets else (REFERENCE_SETS if a.reference else choose())
+    picked = a.assets if a.assets else (REFERENCE_SETS if a.reference else ROAD_SETS if a.road else choose())
     print("assets:", ", ".join(picked))
     if a.list:
         return
