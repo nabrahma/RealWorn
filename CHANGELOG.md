@@ -7,6 +7,19 @@ All notable changes to RealWorn are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Puddle layer**, the seventh kind: standing water where a water level is above the ground.
+  - One click (Damp, Wet, Puddles, Soaked) fills the low spots of the base height map first: grout,
+    cracks, then dips.
+  - Painting lowers or raises the ground, so painted puddles still follow its grain.
+  - Depth per point: porosity darkening and a damp halo, a clear coat at IOR 1.33, the ground
+    fading with depth, deep water as a flat mirror.
+  - Water Tint (Clear, Muddy, Oily, Custom); Surface presets; Broad Dips; Wind Ripple, Tide Mark,
+    Debris Settle.
+  - True Depth with the water held flat at the level.
+  - Mask View shows the zones in colour.
+  - Bake Material bakes the coat too.
+- The Coat channels go through the layer stack only while a material has a Puddle layer.
+- A reference road scene and a plain-node puddle reference for the tests (`python tests/corpus/fetch.py --road`).
 - Contributing guide, code of conduct, security policy, issue and pull request templates.
 - Continuous integration for the pure-Python tests.
 

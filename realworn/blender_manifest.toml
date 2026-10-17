@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "realworn"
-version = "3.1.0"
+version = "3.3.0"
 name = "RealWorn"
 tagline = "Paintable texture layers for realistic buildings and surfaces"
 maintainer = "Nabaskar"

@@ -31,14 +31,17 @@ Remove restores your original material exactly.
 - **Load Texture.** Any Poly Haven or ambientCG folder loads with one pick:
   - colour, roughness or gloss, metallic, height, and packed ARM/ORM maps;
   - real-world size from the folder name.
-- **Six layer kinds.** Every layer is a material plus a mask: Variation, Paint, Reveal, Decals, Edge
-  Wear and Dirt.
+- **Seven layer kinds.** Every layer is a material plus a mask: Variation, Paint, Reveal, Decals, Edge
+  Wear, Dirt and Puddle.
+- **Puddles.** Standing water in one click or painted, filling grout and dips first, with real depth:
+  darker wet ground, a clear coat, deep water as a flat mirror.
 - **One mask recipe for everything.** A source minus a grunge, then a ramp. You control it with
   three sliders: Breakup, Sharpness and Threshold.
-- **Painting with Blender's own brushes.** Three ready-made brushes:
+- **Painting with Blender's own brushes.** Four ready-made brushes:
   - soft paint;
   - a damage brush with texture-mask alphas;
-  - a stencil brush for decals.
+  - a stencil brush for decals;
+  - a puddle brush, round or with a grunge outline.
 - **Bundled libraries,** all generated from code and CC0:
   - 22 grunges;
   - 6 damage alphas;
@@ -78,11 +81,12 @@ RealWorn lives in the 3D Viewport sidebar, tab **RealWorn**, and in the Image Ed
    | **Decals** | Drips, dirt, graffiti, stickers on one transparent image | Pick a decal and paint through the stencil. Right-drag moves it, Ctrl right-drag rotates, Shift right-drag scales |
    | **Edge Wear** | Worn edges from the Bevel node | **Width** (mm) and Breakup; paint touch-ups if needed |
    | **Dirt** | Dirt in corners and crevices from ambient occlusion | **Distance** (cm), Breakup, Sharpness; paint extra dirt by hand |
+   | **Puddle** | Standing water in the low spots of the ground | **Water Level**; paint to add water or dry spots out (see [Puddles](#puddles)) |
 
 4. Finish with **Bake Material** for heavy renders, or **Export Textures** for a game engine.
 
-New layers drop into a sensible place in the stack (variations low, dirt on top); the arrows move
-them anywhere.
+New layers drop into a sensible place in the stack (variations low, dirt and puddles on top); the
+arrows move them anywhere.
 
 ## The layer model
 
@@ -104,8 +108,9 @@ Hue, Saturation and Value work on any content.
 | Reveal | your painting; the content sits underneath, lowered by Depth | RW Damage |
 | Decals | the painted decal image's own alpha | RW Stencil |
 | Dirt | ambient occlusion, plus optional painting | RW Soft |
+| Puddle | where a water level is above the ground (its own model, below), plus optional painting | RW Puddle |
 
-**The mask recipe:** `M = ramp(source − amount × ramp(grunge)) × opacity`.
+**The mask recipe** (every kind but Puddle): `M = ramp(source − amount × ramp(grunge)) × opacity`.
 
 - **Breakup** is the subtracted grunge.
 - **Sharpness** sets the ramp's width.
@@ -130,12 +135,61 @@ If you open the Shader Editor, you'll find ordinary Blender nodes in one group p
 | RW Soft | Paint, Dirt | round, smooth falloff |
 | RW Damage | Reveal, Edge Wear | damage alpha as Texture Mask, View Plane, Rake, Constant falloff |
 | RW Stencil | Decals | the decal as a Stencil texture, Image Aspect, Override Overlay |
+| RW Puddle | Puddle | round, smooth falloff, or a grunge as its mask for ragged outlines |
 
-- **Erasing:** hold **Ctrl** to erase. On masks that paints black; on Decals it erases alpha.
+- **Erasing:** hold **Ctrl** to erase. On masks that paints black; on Decals it erases alpha; on a
+  Puddle it raises the ground (dries a spot out).
 - **Size and strength:** **F** sets brush size, **Shift F** strength.
 - **Overlay:** while painting, an overlay names the layer, the brush and its shortcuts.
 - **Pie menu:** the **RealWorn Paint** pie menu has no key by default. Assign one under
   Preferences > Keymap.
+
+## Puddles
+
+A **Puddle** layer puts standing water on the ground: in one click, by painting, or both. Water
+collects where a water level is above the ground, so it fills grout, cracks and dips first and
+follows the surface's grain, even where you paint it.
+
+1. Select a road, floor or yard that is set up, with a texture loaded on the Base.
+2. **Add > Puddle > Wet** (or Damp, Puddles, Soaked). The layer goes on top of the stack.
+3. Drag **Water Level**: down for water only in the cracks, up for large pools.
+4. For water exactly where you want it, set **Source** to Auto and Paint (the default) and click
+   **Paint**:
+   - white lowers the ground, so water collects there;
+   - **Ctrl** raises it, to dry a spot out.
+
+   Painting never paints water directly. It moves the ground, so painted puddles still fill
+   grout before stone faces. **Source: Paint** gives water only where you paint.
+
+**What changes with depth:**
+
+| Zone | Looks like |
+| --- | --- |
+| Damp halo | ground slightly darker and less rough |
+| Wet edge | darker by porosity (concrete a lot, metal hardly), with a thin glossy film |
+| Shallow water | the ground seen through the water, darkening with depth; a clear coat at IOR 1.33 |
+| Deep water | a flat mirror; the ground fades into the Water Tint |
+
+**Main controls:** Preset, Source, Water Level, Depth Look (how fast the ground fades), Halo,
+Water Tint (Clear, Muddy, Oily or Custom) and **True Depth**. True Depth gives real displacement
+with the water held flat between raised stones, for low close-ups in Cycles.
+
+**Under Advanced:**
+
+- the ground: Height Source (the stack, the Base only, or flat), a **Surface** preset (Asphalt,
+  Cobblestone, Tiles, Concrete, Dirt Road) and Height Scale;
+- Paint Depth, and Broad Dips for road-scale hollows (always on when the Base has no height map);
+- the zone widths and Darkening;
+- Wind Ripple, Tide Mark, Debris Settle;
+- the Flat Faces threshold: kerbs and walls never hold water.
+
+**Seeing it:**
+
+- **Mask View** shows the zones in colour: dry grey, halo, wet edge, shallow blue, deep navy.
+- Puddles need something to reflect: lights, signs or a bright sky.
+- In EEVEE, turn on **Ray Tracing** (Render Properties) for sharp reflections. The layer row
+  reminds you.
+- **Bake Material** bakes the coat too, so baked puddles stay wet.
 
 ## Edge Wear and Dirt in EEVEE
 
@@ -151,7 +205,7 @@ bakes their sources to images:
 - **Bake Material:** freezes the stack into textures on the `RW_Paint` UV. **Restore Live Stack**
   goes back to editing.
 - **Export Textures:** writes Unity URP/HDRP, Unreal or glTF texture sets.
-- **Reveal True depth:** real displacement with adaptive subdivision, off by default.
+- **True Depth** (Reveal and Puddle): real displacement with adaptive subdivision, off by default.
 - **Remove:** restores the original material, UV maps and slots, and offers to export your painted
   masks first.
 
@@ -176,6 +230,17 @@ scene is a 3 m wall with a typical stack: three Variations, Paint, Reveal and De
 | Same, after Bake Material | +3% to +4% |
 | Mask memory, 1 m object | 144 MB |
 | Bake Edges and AO, two 4K masks, GPU | 48 s |
+
+Puddles, on a night street (asphalt, cobblestones, tiles; 960 x 540), against the same street
+without them:
+
+| Measure | Result |
+| --- | --- |
+| Cycles render cost, auto puddles, GPU, fixed 1024 samples | +11% |
+| Same, Cycles defaults (adaptive sampling) | +21%: sharp reflections take more samples to clear |
+| With painting and broad dips, fixed / defaults | +25% / +118% (broad dips add much more water) |
+| True Depth, low close-up | +61% over shading only |
+| Puddle paint mask, 1 m object | 64 MB (2048 px float) |
 
 Bake Material before heavy final renders.
 
