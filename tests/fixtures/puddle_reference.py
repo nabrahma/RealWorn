@@ -23,6 +23,19 @@ Per material (millimetres throughout):
   coat     weight max(0, edge), roughness lerp(lerp(0.08, 0.02, water), 0.005, deep) by edge,
            IOR lerp(1.5, 1.33, edge); normal: the bumped normal toward the flat one by water
   relief   a Bump node (Distance 1) on the base height, Strength exp(-max(d, 0) / Depth Look) x (1 - deep)
+
+The wet film (when Wet Film is above 0), a thin skin of water over every flat face:
+
+  breakup  B(offset): noise(Object / Film Scale + offset; Scale 1, Detail 3, Roughness 0.5) through
+           smoothstep(0.3, 0.7), or a grunge image (box projection, Non-Color) at the same coordinates;
+           B1 = B(0), B2 = B((0.37, 0.71, 0.13)); film_uniform holds B2 at 0.5 (a test baseline: no patches)
+  F        Wet Film x flat x (1 - Dry Patches x smoothstep(0.4, 0.6, B1))
+  R        Relief Through Film x (0.2 + 0.8 B2) x (1 - deep)
+  colour   wetness max(wet, F) in the porosity darkening
+  rough    x (1 - 0.7 F) before the water
+  coat     weight max(edge, F); roughness lerp(lerp(0.03, lerp(0.12, Film Gloss, F), flat), the zone's, edge);
+           IOR lerp(1.5, 1.33, max(edge, flat)); normal: a second Bump (Distance 1, Strength R) of the
+           same height, toward the flat normal by water
 """
 
 import os
@@ -105,7 +118,9 @@ def build_material(obj, maps, scale, bump, height_range, puddle, marking=None):
     """The reference material on `obj`. `maps`: {color, roughness, height} files; `puddle`: the
     puddle settings (water_level_mm, height_scale_mm, dips, dip_depth_mm, dip_scale_m,
     depth_look_mm, halo, edge_width_mm, halo_width_mm, deep_threshold_mm, darkening,
-    flat_threshold, tint); `marking`: an RGBA image sampled through the paint UV, or None."""
+    flat_threshold, tint; optionally the film: wet_film, film_relief, dry_patches, film_gloss,
+    film_scale_m, film_grunge (an image path, None for noise)); `marking`: an RGBA image sampled
+    through the paint UV, or None."""
     p = puddle
     mat = bpy.data.materials.new("Reference_Puddle")
     mat.displacement_method = "BUMP"
@@ -170,9 +185,33 @@ def build_material(obj, maps, scale, bump, height_range, puddle, marking=None):
     E = T.smooth(d, -p["edge_width_mm"], 0.0)
     Hh = T.smooth(d, -(p["edge_width_mm"] + p["halo_width_mm"] * p["halo"]), -p["edge_width_mm"])
     wet = T.math("MAXIMUM", T.math("MULTIPLY", Hh, 0.4), E)
+    # wet film
+    F = R = None
+    if p.get("wet_film", 0.0) > 0.0:
+        fs = 1.0 / p["film_scale_m"]
+
+        def breakup(offset):
+            fm = T.node("ShaderNodeMapping")
+            fm.inputs["Scale"].default_value = (fs, fs, fs)
+            fm.inputs["Location"].default_value = offset
+            T.l.new(tc.outputs["Object"], fm.inputs["Vector"])
+            if p.get("film_grunge"):
+                return _image(T, p["film_grunge"], fm.outputs["Vector"], True)
+            fn = T.node("ShaderNodeTexNoise")
+            fn.inputs["Scale"].default_value, fn.inputs["Detail"].default_value = 1.0, 3.0
+            fn.inputs["Roughness"].default_value = 0.5
+            T.l.new(fm.outputs["Vector"], fn.inputs["Vector"])
+            return T.smooth(fn.outputs["Fac"], 0.3, 0.7)
+
+        b1, b2 = breakup((0.0, 0.0, 0.0)), 0.5 if p.get("film_uniform") else breakup((0.37, 0.71, 0.13))
+        dry = T.math("MULTIPLY", p["dry_patches"], T.smooth(b1, 0.4, 0.6))
+        F = T.math("MULTIPLY", T.math("MULTIPLY", p["wet_film"], gate), T.math("SUBTRACT", 1.0, dry))
+        R = T.math("MULTIPLY", T.math("MULTIPLY", p["film_relief"], T.math("MULTIPLY_ADD", b2, 0.8, 0.2)),
+                   T.math("SUBTRACT", 1.0, D))
+        wet_film = T.math("MAXIMUM", wet, F)
     # colour
     por = T.linear(rough, 0.5, 0.9)
-    k = T.math("MULTIPLY", T.math("MULTIPLY", por, wet), p["darkening"])  # metallic is 0 on the road
+    k = T.math("MULTIPLY", T.math("MULTIPLY", por, wet if F is None else wet_film), p["darkening"])  # metal 0
     keep = T.math("MULTIPLY_ADD", k, -0.8, 1.0)
     c_wet = T.mix(1.0, color, keep, blend="MULTIPLY")
     look = p["depth_look_mm"] * (0.5 if p.get("tint") == "MUDDY" else 1.0)
@@ -182,12 +221,20 @@ def build_material(obj, maps, scale, bump, height_range, puddle, marking=None):
     # roughness
     r = T.math("MULTIPLY", rough, T.math("MULTIPLY_ADD", Hh, -0.15, 1.0))
     r = T.math("MULTIPLY", r, T.math("MULTIPLY_ADD", E, -(1.0 - 0.5 / 0.85), 1.0))
+    if F is not None:
+        r = T.math("MULTIPLY", r, T.math("MULTIPLY_ADD", F, -0.7, 1.0))
     r = T.mix(W, r, 0.3, dtype="FLOAT")
     # coat
     cw = T.math("MAXIMUM", 0.0, E)
     cr = T.mix(D, T.mix(W, 0.08, 0.02, dtype="FLOAT"), 0.005, dtype="FLOAT")
-    cr = T.mix(E, 0.03, cr, dtype="FLOAT")
-    cior = T.mix(E, 1.5, 1.33, dtype="FLOAT")
+    if F is None:
+        cr = T.mix(E, 0.03, cr, dtype="FLOAT")
+        cior = T.mix(E, 1.5, 1.33, dtype="FLOAT")
+    else:
+        cw = T.math("MAXIMUM", cw, F)
+        film_r = T.mix(gate, 0.03, T.mix(F, 0.12, p["film_gloss"], dtype="FLOAT"), dtype="FLOAT")
+        cr = T.mix(E, film_r, cr, dtype="FLOAT")
+        cior = T.mix(T.math("MAXIMUM", E, gate), 1.5, 1.33, dtype="FLOAT")
     # relief
     fade = T.math("MULTIPLY", a, T.math("SUBTRACT", 1.0, D, clamp=True))
     strength = T.math("SUBTRACT", 1.0, T.math("SUBTRACT", 1.0, fade, clamp=True), clamp=True)
@@ -196,7 +243,15 @@ def build_material(obj, maps, scale, bump, height_range, puddle, marking=None):
     T.set(bump.inputs["Strength"], strength)
     T.set(bump.inputs["Height"], height)
     T.set(bump.inputs["Normal"], geo.outputs["Normal"])
-    flat_mix = T.mix(W, bump.outputs["Normal"], geo.outputs["Normal"], dtype="VECTOR")
+    ground = bump.outputs["Normal"]
+    if R is not None:
+        fb = T.node("ShaderNodeBump")
+        fb.inputs["Distance"].default_value = 1.0
+        T.set(fb.inputs["Strength"], R)
+        T.set(fb.inputs["Height"], height)
+        T.set(fb.inputs["Normal"], geo.outputs["Normal"])
+        ground = fb.outputs["Normal"]
+    flat_mix = T.mix(W, ground, geo.outputs["Normal"], dtype="VECTOR")
     norm = T.node("ShaderNodeVectorMath", operation="NORMALIZE")
     T.l.new(flat_mix, norm.inputs[0])
     for sock, val in (("Base Color", color), ("Roughness", r), ("Metallic", 0.0), ("Normal", bump.outputs["Normal"]),

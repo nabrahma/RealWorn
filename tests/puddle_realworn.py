@@ -2,6 +2,8 @@
 sliders) and a copy carrying the same paint layout with the plain-node puddle reference. Shared by
 tests/test_puddles.py and the performance tests."""
 
+import os
+
 import bpy
 
 from fixtures import make_road as MR
@@ -18,12 +20,22 @@ PUDDLES = {
 }
 MARKING_RES = 2048
 
+# The wet film per surface (the cobblestones use a library grunge as the Film Breakup, the others Noise).
+GRUNGES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "realworn", "assets", "grunges")
+FILM_COMMON = dict(wet_film=1.0, film_relief=0.6, dry_patches=0.3, film_gloss=0.02, film_scale_m=1.5)
+FILM = {
+    "asphalt": dict(FILM_COMMON),
+    "cobble": dict(FILM_COMMON, film_grunge="grime_clouds.png", film_scale_m=2.0),
+    "tiles": dict(FILM_COMMON, dry_patches=0.0),
+}
+
 
 def puddle_values(p):
     """Layer property values for a settings dict."""
     out = {k: v for k, v in p.items() if k in ("water_level_mm", "height_scale_mm", "dip_depth_mm", "dip_scale_m",
                                                   "depth_look_mm", "halo", "edge_width_mm", "halo_width_mm",
-                                                  "deep_threshold_mm", "darkening", "flat_threshold")}
+                                                  "deep_threshold_mm", "darkening", "flat_threshold", "wet_film",
+                                                  "film_relief", "dry_patches", "film_gloss", "film_scale_m")}
     out["broad_dips"] = bool(p.get("dips"))
     out["water_tint"] = p.get("tint", "CLEAR")
     out["puddle_source"] = "AUTO"
@@ -35,12 +47,23 @@ def add_puddle(mat, p):
     ly = mat.realworn.layers[mat.realworn.active_layer_index]
     for k, v in puddle_values(p).items():
         setattr(ly, k, v)
+    if p.get("film_grunge"):
+        from realworn.core import grunge
+        ly.film_grunge = grunge.load("grunges", p["film_grunge"])
     return ly
 
 
-def build_pair(sc, marking=True, puddles=True):
-    """The street, set up in RealWorn with its textures, marking and Puddle layers, plus the
-    reference copies. Returns {key: (realworn object, reference object)}."""
+def reference_settings(p):
+    """The settings as the plain-node reference takes them (the grunge as a file path)."""
+    out = dict(p)
+    if p.get("film_grunge"):
+        out["film_grunge"] = os.path.join(GRUNGES, p["film_grunge"])
+    return out
+
+
+def build_pair(sc, marking=True, puddles=True, film=False):
+    """The street, set up in RealWorn with its textures, marking and Puddle layers (with the wet
+    film if `film`), plus the reference copies. Returns {key: (realworn object, reference object)}."""
     from realworn.core import images
     objs = MR.build_scene(sc)
     pairs = {}
@@ -66,11 +89,12 @@ def build_pair(sc, marking=True, puddles=True):
             ly.roughness = 0.6
             RW.write_image(images.ensure_mask(ob, mat, ly), arr)
             mk = RW.new_image("ref_marking", arr)
+        settings = dict(PUDDLES[key], **FILM[key]) if film else PUDDLES[key]
         if puddles:
-            add_puddle(mat, PUDDLES[key])
+            add_puddle(mat, settings)
         maps = MR.set_maps(key)
-        PR.build_material(ref, maps, MR.SET_SCALE[key], MR.BUMP, MR.height_range(maps["height"]), PUDDLES[key]
-                          if puddles else _dry(PUDDLES[key]), marking=mk)
+        PR.build_material(ref, maps, MR.SET_SCALE[key], MR.BUMP, MR.height_range(maps["height"]),
+                          reference_settings(settings) if puddles else _dry(PUDDLES[key]), marking=mk)
         pairs[key] = (ob, ref)
     return pairs
 

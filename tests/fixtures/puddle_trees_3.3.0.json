@@ -1,0 +1,21 @@
+{
+ "trees": {
+  "default": {
+   "material": "42363b89ba843845c01b5cf04b51a7e3e9d67bd12af330ae544dc5ca3e308e7b",
+   "stack": "25f4a31b40642acf14be5eced2c46cfd490520550dc376a313bd3996f81b7e03"
+  },
+  "extras": {
+   "material": "42363b89ba843845c01b5cf04b51a7e3e9d67bd12af330ae544dc5ca3e308e7b",
+   "stack": "90d9a28d7839a4a4b26ec74747990f68b991c71cc9317d619776ed8b536bc329"
+  },
+  "paint_only": {
+   "material": "42363b89ba843845c01b5cf04b51a7e3e9d67bd12af330ae544dc5ca3e308e7b",
+   "stack": "2abd9f9ca5a1fd09c0016aa3507c88a94f6fbfe7a717ff94f00f91a9f31db147"
+  },
+  "true_depth": {
+   "material": "a4aafbfddfc5631a23a5e2be8a8e466ff1cb6f887d6e548f7cbe7e7565b686bd",
+   "stack": "37b204263e0d0d5433e1d4bec98dee75537e24aa2ad89a43b72f5abd5b29e7fb"
+  }
+ },
+ "version": "3.3.0"
+}

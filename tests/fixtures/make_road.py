@@ -5,8 +5,10 @@
   tiles     a raised tiled pavement on the right, at kerb height
 
 Emissive signs at the far end and a street lamp give the water something to reflect; the sky is
-a dim night blue. Two framings: WIDE looks along the street from standing height, LOW sits a
-hand above the ground for the close-up. Texture sets are CC0 Poly Haven sets in the test corpus
+a dim night blue. Three framings: WIDE looks along the street from standing height, LOW sits a
+hand above the ground for the close-up, and WINDOW looks down at the tiled pavement at about 45
+degrees, with a lit shop window standing at the pavement's edge and a small red light on the
+right (both shown only in that framing, like a wet sidewalk outside a storefront at night). Texture sets are CC0 Poly Haven sets in the test corpus
 (python tests/corpus/fetch.py --road). No RealWorn code is imported here.
 """
 
@@ -28,7 +30,9 @@ LENGTH = (-1.0, 10.0)  # the street runs along +Y
 FRAMES = {
     "WIDE": dict(location=(0.15, -1.6, 1.55), target=(-0.1, 7.0, 0.0), lens=28.0),
     "LOW": dict(location=(0.35, 0.6, 0.16), target=(-0.15, 5.0, 0.02), lens=22.0),
+    "WINDOW": dict(location=(0.0, 4.0, 2.6), target=(2.4, 4.8, KERB), lens=24.0),
 }
+WINDOW_PROPS = ("Shop_Window", "Red_Light", "Red_Lamp")  # rendered only in the WINDOW framing
 
 
 def available():
@@ -90,6 +94,24 @@ def _kerb(x0, x1, y0, y1, h):
     return verts, faces
 
 
+def _emitter(scene, name, verts, color, strength):
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], [(0, 1, 2, 3)])
+    ob = bpy.data.objects.new(name, me)
+    scene.collection.objects.link(ob)
+    m = bpy.data.materials.new(name + "_Mat")
+    nt = m.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+    em = nt.nodes.new("ShaderNodeEmission")
+    em.inputs["Color"].default_value = (*color, 1.0)
+    em.inputs["Strength"].default_value = strength
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    nt.links.new(em.outputs[0], out.inputs["Surface"])
+    me.materials.append(m)
+    return ob
+
+
 def build_scene(scene):
     """Builds the street. Returns {'asphalt': obj, 'cobble': obj, 'tiles': obj}."""
     y0, y1 = LENGTH
@@ -122,6 +144,17 @@ def build_scene(scene):
     lamp = bpy.data.objects.new("Street_Lamp", lamp_d)
     scene.collection.objects.link(lamp)
     lamp.location = (2.2, 4.5, 3.6)
+    # the storefront for the WINDOW framing: a lit window at the pavement's edge, a red light
+    x = 3.6
+    _emitter(scene, "Shop_Window", [(x, 4.0, KERB + 0.05), (x, 7.0, KERB + 0.05), (x, 7.0, 2.3), (x, 4.0, 2.3)],
+             (1.0, 0.86, 0.68), 6.0)
+    _emitter(scene, "Red_Light", [(x - 0.02, 3.0, 0.35), (x - 0.02, 3.4, 0.35), (x - 0.02, 3.4, 0.75),
+                                  (x - 0.02, 3.0, 0.75)], (1.0, 0.04, 0.03), 20.0)
+    red = bpy.data.lights.new("Red_Lamp", "POINT")
+    red.energy, red.color, red.shadow_soft_size = 25.0, (1.0, 0.05, 0.03), 0.1
+    red_ob = bpy.data.objects.new("Red_Lamp", red)
+    scene.collection.objects.link(red_ob)
+    red_ob.location = (3.3, 3.2, 0.6)
     if scene.world is None:
         scene.world = bpy.data.worlds.new("Night")
     if scene.world.node_tree is None:
@@ -138,6 +171,10 @@ def build_scene(scene):
 
 def frame(scene, which):
     f = FRAMES[which]
+    for name in WINDOW_PROPS:
+        ob = scene.objects.get(name)
+        if ob is not None:
+            ob.hide_render = which != "WINDOW"
     cam = scene.camera
     cam.data.lens = f["lens"]
     cam.data.clip_start = 0.01
