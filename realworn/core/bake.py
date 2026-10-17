@@ -6,6 +6,7 @@ selection, active object, active UV), bake with the RW_Paint UV map, restore all
 back from GPU to CPU if a GPU bake raises.
 """
 
+import contextlib
 import json
 import os
 import tempfile
@@ -84,10 +85,17 @@ def run(scene, obj, mats, img, bake_type="EMIT", samples=4, margin=8):
     obj.select_set(True)
     vl.objects.active = obj
     _target_nodes(mats, img)
+    # A tangent-space normal bake takes its tangents from the active UV map (the one selected in
+    # the UV Maps list), while the baked map is read through RW_Paint (Normal Map node): RW_Paint is
+    # selected for the bake, or the normals come out turned wherever the two maps are (Cube
+    # Projection turns faces). Only the selection changes, and it is put back.
+    uvs = obj.data.uv_layers
+    active_uv = uvs.active.name if uvs.active is not None else None
     try:
         kw = dict(type=bake_type, margin=margin, use_clear=True, uv_layer=naming.UV_PAINT)
         if bake_type == "NORMAL":
             kw.update(normal_space="TANGENT")
+            uvs.active = uvs[naming.UV_PAINT]
         try:
             with bpy.context.temp_override(**ctx.override(obj, scene=scene, view_layer=vl)):
                 bpy.ops.object.bake(**kw)
@@ -99,6 +107,8 @@ def run(scene, obj, mats, img, bake_type="EMIT", samples=4, margin=8):
             else:
                 raise
     finally:
+        if active_uv is not None and active_uv in uvs:
+            uvs.active = uvs[active_uv]
         _drop_targets(mats)
         r.engine, scene.cycles.samples = saved["engine"], saved["samples"]
         scene.cycles.tile_size = saved["tile"]
@@ -192,6 +202,29 @@ def _float_to_target(src, target, srgb):
     target.update()
 
 
+@contextlib.contextmanager
+def _normal_source(mat, channel="Normal"):
+    """For a NORMAL bake of a material whose coat goes through the stack: the coat is switched off
+    (Cycles bakes the average normal of every closure, so the coat would blend in), and `channel`
+    ("Normal" or "Coat Normal") of the stack feeds the Principled's Normal."""
+    nt = mat.node_tree
+    pairs = [(st, _principled(nt, st)) for st in injector.stacks(nt)]
+    pairs = [(st, p) for st, p in pairs if p is not None and st.outputs.get("Coat Weight") is not None]
+    zero = nodeutil.new(nt, "ShaderNodeValue", "bake_zero", frame=nodeutil.ensure_frame(nt)) if pairs else None
+    try:
+        for st, p in pairs:
+            zero.outputs[0].default_value = 0.0
+            nt.links.new(zero.outputs[0], injector.channel_target(nt, p, "Coat Weight"))
+            nt.links.new(st.outputs[channel], injector.channel_target(nt, p, "Normal"))
+        yield
+    finally:
+        for st, p in pairs:
+            for ch in ("Coat Weight", "Normal"):
+                nt.links.new(st.outputs[ch], injector.channel_target(nt, p, ch))
+        if zero is not None:
+            nt.nodes.remove(zero)
+
+
 def bake_material(obj, mat, scene=None, resolution=2048, folder="//rw_bake/", swap=True, samples=16):
     """UI-5: bake the whole stack to PBR textures on RW_Paint and swap the stack for them.
     Returns {key: image}; images are saved to `folder` (8-bit PNG, height as float EXR in metres)."""
@@ -215,7 +248,15 @@ def bake_material(obj, mat, scene=None, resolution=2048, folder="//rw_bake/", sw
         bpy.data.images.remove(raw)
         result[key] = img
     nimg = new_image("{}_normal".format(bpy.path.clean_name(mat.name)), resolution, "Non-Color")
-    run(scene, obj, [mat], nimg, "NORMAL", samples=samples)
+    if compiler.has_coat(mat.realworn.stack):  # the ground's normal and the coat's, baked apart
+        with _normal_source(mat, "Normal"):
+            run(scene, obj, [mat], nimg, "NORMAL", samples=samples)
+        cimg = new_image("{}_coat_normal".format(bpy.path.clean_name(mat.name)), resolution, "Non-Color")
+        with _normal_source(mat, "Coat Normal"):
+            run(scene, obj, [mat], cimg, "NORMAL", samples=samples)
+        result["coat_normal"] = cimg
+    else:
+        run(scene, obj, [mat], nimg, "NORMAL", samples=samples)
     result["normal"] = nimg
     for key, img in result.items():
         img[BAKED_KEY] = True
@@ -267,12 +308,18 @@ def swap_to_baked(mat, images_by_key):
     nmap.uv_map = naming.UV_PAINT
     nmap.hide = True
     nt.links.new(nodes["normal"].outputs["Color"], nmap.inputs["Color"])
+    coat_nmap = nmap
+    if "coat_normal" in nodes:
+        coat_nmap = nodeutil.new(nt, "ShaderNodeNormalMap", "baked.coat_nmap", frame=frame)
+        coat_nmap.uv_map = naming.UV_PAINT
+        coat_nmap.hide = True
+        nt.links.new(nodes["coat_normal"].outputs["Color"], coat_nmap.inputs["Color"])
     for st in injector.stacks(nt):
         p = _principled(nt, st)
         if p is None:
             continue
         x, y = injector._abs(st)
-        for i, n in enumerate([uvn] + list(nodes.values()) + [nmap]):
+        for i, n in enumerate([uvn] + list(nodes.values()) + [nmap] + ([coat_nmap] if coat_nmap is not nmap else [])):
             injector._place(n, x + 30, y + 200 + i * 40)
         tgt = {ch: injector.channel_target(nt, p, ch) for ch in naming.CHANNELS}  # 3.1: under other layers
         nt.links.new(nodes["base_color"].outputs["Color"], tgt["Base Color"])
@@ -285,7 +332,7 @@ def swap_to_baked(mat, images_by_key):
             else:
                 nt.links.new(nodes[key].outputs["Color"], tgt[sock])
         nt.links.new(nmap.outputs["Normal"], tgt["Normal"])
-        _swap_coat(nt, st, p, nodes, nmap, images_by_key, frame)
+        _swap_coat(nt, st, p, nodes, coat_nmap, images_by_key, frame)
     injector.unlink_displacement(mat)
     mat[BAKED_KEY] = json.dumps({k: img.name for k, img in images_by_key.items()})
     mat.realworn.baked = True
@@ -294,7 +341,8 @@ def swap_to_baked(mat, images_by_key):
 
 def _swap_coat(nt, stack, p, nodes, nmap, images_by_key, frame):
     """Puddle: the baked coat weight, roughness (and oily thin film) feed the Principled; the coat
-    is water (IOR 1.33) and its normal is the baked one (flat under deep water)."""
+    is water (IOR 1.33) and its normal is its own baked normal (flat under deep water, the ground's
+    relief at the film's strength under a wet film)."""
     if "coat_weight" not in images_by_key or stack.outputs.get("Coat Weight") is None:
         return
     for key, ch in (("coat_weight", "Coat Weight"), ("coat_roughness", "Coat Roughness"),

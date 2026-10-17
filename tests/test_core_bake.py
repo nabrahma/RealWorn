@@ -74,6 +74,56 @@ def test_bake_material_swap_restore_remove(empty_scene, out_dir):
     assert not nodeutil.owned_nodes(mat.node_tree)
 
 
+def test_baked_normal_map_matches_the_live_normal(empty_scene, out_dir):
+    """The baked normal map, read through RW_Paint, gives the live shading normal back, even where
+    Cube Projection turned RW_Paint against the object's own UV map (the bake must take its tangents
+    from RW_Paint)."""
+    from test_puddles import make_set, plane, render_exr, top_camera
+    sc = empty_scene
+    n = 256
+    y, x = (np.mgrid[0:n, 0:n] + 0.5) / n
+    grain = (0.5 + 0.3 * np.sin(x * 40) * np.cos(y * 37)).astype(np.float32)
+    ob, mat = plane(sc)
+    assert ob.data.uv_layers.active.name != naming.UV_PAINT
+    layers.load_texture(mat, make_set(out_dir, "nrm_grain", grain), scale=2.0)
+    mat.realworn.base.bump = 0.2
+    top_camera(sc, res=128, samples=4)
+    nt = mat.node_tree
+    out = nodeutil.output_node(nt)
+    surface = out.inputs["Surface"].links[0].from_socket
+
+    def normal_view(sock, name):
+        """Render a normal (world space) as colour, then put the surface back."""
+        view = nt.nodes.new("ShaderNodeVectorMath")
+        view.operation = "MULTIPLY_ADD"
+        view.inputs[1].default_value = view.inputs[2].default_value = (0.5, 0.5, 0.5)
+        em = nt.nodes.new("ShaderNodeEmission")
+        nt.links.new(sock, view.inputs[0])
+        nt.links.new(view.outputs[0], em.inputs["Color"])
+        nt.links.new(em.outputs[0], out.inputs["Surface"])
+        try:
+            return render_exr(sc, os.path.join(out_dir, "nrm_{}.exr".format(name)))[16:112, 16:112] * 2 - 1
+        finally:
+            nt.nodes.remove(view)
+            nt.nodes.remove(em)
+            nt.links.new(surface, out.inputs["Surface"])
+
+    geo = nt.nodes.new("ShaderNodeNewGeometry")  # the shading normal, bumped by the live height
+    live = normal_view(geo.outputs["Normal"], "live")
+    nt.nodes.remove(geo)
+    bake.bake_material(ob, mat, sc, resolution=512, folder=os.path.join(out_dir, "nrm_bake"), samples=4)
+    assert ob.data.uv_layers.active.name != naming.UV_PAINT  # the selection is put back
+    baked = normal_view(nt.nodes["RW::baked.nmap"].outputs["Normal"], "baked")
+    assert live[..., :2].std() > 0.05  # the relief is there to compare
+    for i, axis in enumerate("xy"):
+        r = float(np.corrcoef(live[..., i].ravel(), baked[..., i].ravel())[0, 1])
+        d = float(np.abs(live[..., i] - baked[..., i]).mean())
+        print("\n[bake] normal {}: correlation live vs baked {:.4f}, mean difference {:.4f}".format(axis, r, d))
+        assert r > 0.99 and d < 0.02
+    bake.restore_live(mat)
+    assert setup.remove_object(ob) == []
+
+
 # ------------------------------------------------------------- Export
 def test_export_presets(empty_scene, out_dir):
     sc = empty_scene
