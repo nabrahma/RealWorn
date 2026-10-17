@@ -167,7 +167,20 @@ def linear_to_srgb(x):
 # ================================================================ Bake Material
 MATERIAL_CHANNELS = (("base_color", "Base Color", "sRGB"), ("roughness", "Roughness", "Non-Color"),
                      ("metallic", "Metallic", "Non-Color"), ("height", "Displacement", "Non-Color"))
+# Baked too while a Puddle layer routes the Coat through the stack (thin film only for oily water,
+# kept in nanometres in a float image).
+COAT_BAKE = (("coat_weight", "Coat Weight", "Non-Color"), ("coat_roughness", "Coat Roughness", "Non-Color"),
+             ("thin_film", "Thin Film Thickness", "Non-Color"))
+FLOAT_KEYS = ("height", "thin_film")
 BAKED_KEY = "rw_baked_images"
+
+
+def bake_channels(mat):
+    chans = list(MATERIAL_CHANNELS)
+    if compiler.has_coat(mat.realworn.stack):
+        oily = any(ly.kind == "PUDDLE" and ly.visible and ly.water_tint == "OILY" for ly in mat.realworn.layers)
+        chans += [c for c in COAT_BAKE if c[0] != "thin_film" or oily]
+    return chans
 
 
 def _float_to_target(src, target, srgb):
@@ -187,14 +200,14 @@ def bake_material(obj, mat, scene=None, resolution=2048, folder="//rw_bake/", sw
         raise BakeError("{}: not set up".format(mat.name))
     out_dir = output_folder(folder)
     result = {}
-    for key, socket, cs in MATERIAL_CHANNELS:
+    for key, socket, cs in bake_channels(mat):
         if key == "height" and not compiler.has_height(mat):
             continue
         raw = new_image("rw_tmp_bake", resolution, "Non-Color", float_buffer=True)
         bake_socket(scene, obj, mat, stack_output(socket), raw)
         img = new_image("{}_{}".format(bpy.path.clean_name(mat.name), key), resolution, cs,
-                        float_buffer=(key == "height"))
-        if key == "height":
+                        float_buffer=(key in FLOAT_KEYS))
+        if key in FLOAT_KEYS:
             img.pixels.foreach_set(pixels(raw).ravel())
             img.update()
         else:
@@ -272,10 +285,37 @@ def swap_to_baked(mat, images_by_key):
             else:
                 nt.links.new(nodes[key].outputs["Color"], tgt[sock])
         nt.links.new(nmap.outputs["Normal"], tgt["Normal"])
+        _swap_coat(nt, st, p, nodes, nmap, images_by_key, frame)
     injector.unlink_displacement(mat)
     mat[BAKED_KEY] = json.dumps({k: img.name for k, img in images_by_key.items()})
     mat.realworn.baked = True
     return True
+
+
+def _swap_coat(nt, stack, p, nodes, nmap, images_by_key, frame):
+    """Puddle: the baked coat weight, roughness (and oily thin film) feed the Principled; the coat
+    is water (IOR 1.33) and its normal is the baked one (flat under deep water)."""
+    if "coat_weight" not in images_by_key or stack.outputs.get("Coat Weight") is None:
+        return
+    for key, ch in (("coat_weight", "Coat Weight"), ("coat_roughness", "Coat Roughness"),
+                    ("thin_film", "Thin Film Thickness")):
+        if key not in images_by_key:
+            continue
+        tgt = injector.channel_target(nt, p, ch)
+        const = constant_value(images_by_key[key]) if key != "thin_film" else None
+        if const is not None:
+            v = nodeutil.find(nt, "baked.const." + key) or nodeutil.new(nt, "ShaderNodeValue", "baked.const." + key,
+                                                                          frame=frame)
+            v.outputs[0].default_value = const
+            v.hide = True
+            nt.links.new(v.outputs[0], tgt)
+        else:
+            nt.links.new(nodes[key].outputs["Color"], tgt)
+    ior = nodeutil.find(nt, "baked.coat_ior") or nodeutil.new(nt, "ShaderNodeValue", "baked.coat_ior", frame=frame)
+    ior.outputs[0].default_value = 1.33
+    ior.hide = True
+    nt.links.new(ior.outputs[0], injector.channel_target(nt, p, "Coat IOR"))
+    nt.links.new(nmap.outputs["Normal"], injector.channel_target(nt, p, "Coat Normal"))
 
 
 def restore_live(mat):
@@ -286,8 +326,9 @@ def restore_live(mat):
         p = _principled(nt, st)
         if p is None:
             continue
-        for ch in naming.CHANNELS:
-            nt.links.new(st.outputs[ch], injector.channel_target(nt, p, ch))
+        for ch in naming.CHANNELS + naming.COAT_CHANNELS:
+            if st.outputs.get(ch) is not None and p.inputs.get(ch) is not None:
+                nt.links.new(st.outputs[ch], injector.channel_target(nt, p, ch))
     mat.realworn.baked = False
     if BAKED_KEY in mat:
         del mat[BAKED_KEY]

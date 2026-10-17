@@ -145,6 +145,7 @@ BRUSHES = {
     "RW Soft": {"spacing": 10, "strength": 1.0, "falloff": "SMOOTH"},
     "RW Damage": {"spacing": 10, "strength": 1.0, "falloff": "CONSTANT"},
     "RW Stencil": {"spacing": 10, "strength": 1.0, "falloff": "CONSTANT"},
+    "RW Puddle": {"spacing": 10, "strength": 1.0, "falloff": "SMOOTH"},
 }
 DEFAULT_ALPHA = "chips.png"
 DEFAULT_DECAL = "Drips/drips_01.png"
@@ -197,6 +198,41 @@ def set_damage_alpha(key=None, scene=None):
     return b
 
 
+def puddle_outline_items():
+    """Puddle Outline choices: a plain round brush, then the grunge library."""
+    items = _enum_items.setdefault("puddle_outline", [])
+    items.clear()
+    items.append(("NONE", "Round", "A plain soft round brush", 0, 0))
+    for i, it in enumerate(library_enum_items("grunges")):
+        if it[0] != "NONE":
+            items.append((it[0], it[1], it[2], it[3], i + 1))
+    return items
+
+
+def set_puddle_outline(key=None, scene=None):
+    """The Puddle brush: soft and round, or with a grunge as its mask for ragged outlines."""
+    scene = scene or bpy.context.scene
+    key = key if key is not None else scene.get("rw_puddle_outline", "NONE")
+    b = ensure_brush("RW Puddle")
+    img = None
+    if key and key != "NONE":
+        try:
+            img = load("grunges", key)
+        except KeyError:
+            img = None
+    if img is None:
+        b.mask_texture = None
+        key = "NONE"
+    else:
+        _image_texture(b, "mask_texture", img)
+        slot = b.mask_texture_slot
+        slot.mask_map_mode = "VIEW_PLANE"
+        slot.use_rake = False
+        slot.use_random = True
+    scene["rw_puddle_outline"] = key
+    return b
+
+
 def stencil_fit(brush, image, side=None):
     """Image Aspect: the stencil keeps the decal's proportions (what Blender's Stencil Fit Image
     Aspect does), `side` pixels tall (default: keep the current height)."""
@@ -243,6 +279,8 @@ def prepare_brush(kind, scene=None, region=None):
         return set_damage_alpha(scene=scene)
     if name == "RW Stencil":
         return set_stencil_decal(scene=scene, region=region)
+    if name == "RW Puddle":
+        return set_puddle_outline(scene=scene)
     return ensure_brush(name)
 
 

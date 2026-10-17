@@ -1,4 +1,4 @@
-"""The six layer kinds, their defaults and presets, and the mask recipe's
+"""The seven layer kinds, their defaults and presets, and the mask recipe's
 reference math. Pure Python: no bpy, so tests/pure checks it outside Blender.
 
 Every layer is a material plus a mask. Kinds differ only in where the mask comes from:
@@ -9,8 +9,9 @@ Every layer is a material plus a mask. Kinds differ only in where the mask comes
   DECALS     the painted decal image's own alpha
   EDGE_WEAR  Bevel edge detection (the grunge varies the bevel radius), plus optional painting
   DIRT       ambient occlusion, plus Breakup, plus optional painting
+  PUDDLE     water where a water level is above the ground (core/puddle.py), plus optional painting
 
-The mask recipe (MSK-1), the same for every kind:
+The mask recipe, the same for every kind but Puddle:
 
   M = ramp_{t,w}( S - a * ramp_g(G) ) * opacity
 
@@ -19,10 +20,13 @@ Ramp (Breakup Contrast c: stops at c/2 and 1 - c/2), and the outer ramp has stop
 (black) and t + w/2 (white), w = 0.5 at Sharpness 0 down to 0.01 at Sharpness 1.
 """
 
-KINDS = ("VARIATION", "PAINT", "REVEAL", "DECALS", "EDGE_WEAR", "DIRT")
+from . import puddle as _puddle
+
+KINDS = ("VARIATION", "PAINT", "REVEAL", "DECALS", "EDGE_WEAR", "DIRT", "PUDDLE")
 # Default stack position, bottom to top (the classic order: variation over the base, paint over
-# that, worn edges, damage breaking through, decals over the damage, dirt settling on top).
-ORDER = ("VARIATION", "PAINT", "EDGE_WEAR", "REVEAL", "DECALS", "DIRT")
+# that, worn edges, damage breaking through, decals over the damage, dirt settling on top, and
+# water lying on top of everything on the ground).
+ORDER = ("VARIATION", "PAINT", "EDGE_WEAR", "REVEAL", "DECALS", "DIRT", "PUDDLE")
 CONTENTS = ("TEXTURE", "TINT_BELOW", "COLOR")  # Tint Below: a recoloured copy of the Base (the classic trick)
 
 INFO = {
@@ -32,6 +36,7 @@ INFO = {
     "DECALS": {"label": "Decals", "icon": "IMAGE_DATA", "paint": "RW Stencil"},
     "EDGE_WEAR": {"label": "Edge Wear", "icon": "MOD_BEVEL", "paint": "RW Damage", "optional_paint": True},
     "DIRT": {"label": "Dirt", "icon": "SHADING_RENDERED", "paint": "RW Soft", "optional_paint": True},
+    "PUDDLE": {"label": "Puddle", "icon": "MOD_FLUIDSIM", "paint": "RW Puddle", "optional_paint": True},
 }
 
 # Internal recipes for the generated sources (the classic fixed nodes).
@@ -59,6 +64,7 @@ DEFAULTS = {
                       breakup_amount=0.6, threshold=0.5, sharpness=0.5, width_mm=5.0),
     "DIRT": dict(content="COLOR", color=DIRT_BROWN, roughness=0.9, breakup="dust.png", breakup_amount=0.3,
                  threshold=0.45, sharpness=1.0, distance_cm=20.0),
+    "PUDDLE": dict(content="COLOR", breakup_amount=0.0, **_puddle.preset_values(_puddle.DEFAULT_PRESET)),
 }
 
 # Presets offered on the + menu (VAR-2, REV-4, DEC-4). Values override the kind's defaults.
@@ -78,12 +84,14 @@ PRESETS = {
         ("GRAFFITI", "Graffiti", dict(decal_blend="NORMAL")),
         ("GRIME", "Grime", dict(decal_blend="DARKEN", roughness=0.7)),
     ),
+    "PUDDLE": tuple((k, n, dict(v, puddle_preset=k)) for k, n, v in _puddle.PRESETS),
 }
 
 TIPS = {
     "VARIATION": "Keep each Variation subtle and stack several",
     "DECALS": "Drips start at ledges and sills, dirt collects at the bottom, graffiti sits where "
               "a person could reach",
+    "PUDDLE": "Puddles need something to reflect: lights, signs, a bright sky",
 }
 
 

@@ -1,4 +1,4 @@
-"""The six kinds, their default stack positions and presets, and the mask recipe's reference math."""
+"""The seven kinds, their default stack positions and presets, and the mask recipe's reference math."""
 
 import pytest
 from hypothesis import given
@@ -7,8 +7,9 @@ from hypothesis import strategies as st
 from realworn.core import kinds as K
 
 
-def test_six_kinds_and_their_order():
-    assert K.KINDS == ("VARIATION", "PAINT", "REVEAL", "DECALS", "EDGE_WEAR", "DIRT")
+def test_kinds_and_their_order():
+    assert K.KINDS == ("VARIATION", "PAINT", "REVEAL", "DECALS", "EDGE_WEAR", "DIRT", "PUDDLE")
+    assert K.ORDER[-1] == "PUDDLE"  # water lies on top of everything on the ground
     assert set(K.ORDER) == set(K.KINDS) and set(K.INFO) == set(K.KINDS) and set(K.DEFAULTS) == set(K.KINDS)
     # the reference's order: variation over the base, paint over that, worn edges, damage breaking
     # through, decals over the damage, dirt settling on top

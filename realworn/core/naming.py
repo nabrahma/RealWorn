@@ -3,7 +3,7 @@
 Nothing else in the code base hardcodes an attribute, property, image or node name.
 """
 
-SCHEMA = 3  # v3: six kinds (material.realworn.layers); v2.x files used 2, v0.7 files 1
+SCHEMA = 3  # v3: the layer kinds of core/kinds.py (material.realworn.layers); v2.x files used 2, v0.7 files 1
 LOG_PREFIX = "[RealWorn]"
 
 # The paint UV map: every painted mask is sampled through it, never through the user's UVs.
@@ -39,11 +39,21 @@ STACK_INPUTS = (
 )
 STACK_OUTPUTS = (
     ("Base Color", "COLOR"), ("Roughness", "FLOAT"), ("Metallic", "FLOAT"), ("Normal", "VECTOR"),
-    ("Displacement", "FLOAT"), ("Coverage", "FLOAT"), ("Mask View", "FLOAT"),
+    ("Displacement", "FLOAT"), ("Coverage", "FLOAT"), ("Mask View", "FLOAT"), ("Mask Color", "COLOR"),
 )
 # Principled inputs routed through the stack.
 CHANNELS = ("Base Color", "Roughness", "Metallic", "Normal")
-NORMAL_CHANNELS = ("Normal",)
+NORMAL_CHANNELS = ("Normal", "Coat Normal")
+# Routed through the stack only while the material has a Puddle layer (the water is a clear coat);
+# otherwise the material's tree is exactly as without RealWorn's puddles.
+COAT_INPUTS = (
+    ("Coat Weight", "FLOAT", 0.0),
+    ("Coat Roughness", "FLOAT", 0.03),
+    ("Coat IOR", "FLOAT", 1.5),
+    ("Coat Normal", "VECTOR", None),
+    ("Thin Film Thickness", "FLOAT", 0.0),
+)
+COAT_CHANNELS = tuple(name for name, _, _ in COAT_INPUTS)
 
 
 def node_name(role):

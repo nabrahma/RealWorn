@@ -27,6 +27,7 @@ DECAL_MIN_DENSITY = 400                # DEC-2: warn below this many decal px pe
 FORCE_STORAGE = None  # tests set "PACKED" / "PNG" (preferences are unavailable unregistered)
 EMPTY = (0.0, 0.0, 0.0, 1.0)           # a mask with nothing painted
 EMPTY_DECAL = (0.0, 0.0, 0.0, 0.0)     # DEC-1: alpha 0
+NEUTRAL_PUDDLE = (0.5, 0.5, 0.5, 1.0)  # Puddle: grey leaves the ground alone (white lowers, black raises)
 
 
 def _prefs():
@@ -49,8 +50,8 @@ def texel_resolution(obj, density=None):
 
 
 def needs_precision(layer):
-    """Reveal masks drive Depth: float pixels, no terraces in the height."""
-    return layer.kind == "REVEAL"
+    """Reveal and Puddle masks move heights: float pixels, no terraces."""
+    return layer.kind in ("REVEAL", "PUDDLE")
 
 
 def layer_resolution(obj, layer):
@@ -76,7 +77,7 @@ def memory_estimate(obj, layers):
     for ly in layers:
         if ly.mask_image is not None:
             res = ly.mask_image.size[0]
-        elif ly.kind in ("PAINT", "REVEAL", "DECALS"):
+        elif ly.kind in ("PAINT", "REVEAL", "DECALS") or (ly.kind == "PUDDLE" and ly.puddle_source == "PAINT"):
             res = layer_resolution(obj, ly)
         else:
             continue
@@ -101,10 +102,15 @@ def create_mask(obj, layer, res=None):
     img = bpy.data.images.new(name, res, res, alpha=True, float_buffer=needs_precision(layer))
     img.alpha_mode = "CHANNEL_PACKED"
     img.colorspace_settings.name = "sRGB" if decal else "Non-Color"
-    _fill(img, EMPTY_DECAL if decal else EMPTY)
+    _fill(img, empty_value(layer.kind))
     img[naming.IMG_MASK] = "{}/{}".format(obj.name, layer.id)
     store(img, obj)
     return img
+
+
+def empty_value(kind):
+    """What a fresh (or cleared) image of this kind holds: nothing painted."""
+    return EMPTY_DECAL if kind == "DECALS" else (NEUTRAL_PUDDLE if kind == "PUDDLE" else EMPTY)
 
 
 def ensure_mask(obj, mat, layer):
@@ -240,12 +246,14 @@ def upgrade(obj, layer, res=None):
     return new
 
 
-def fill(img, value, decal=False):
-    """PNT-2 Fill (1: the layer everywhere) / Clear (0: nothing painted; decals back to alpha 0)."""
+def fill(img, value, decal=False, kind=None):
+    """Fill (1: the layer everywhere) / Clear (0: nothing painted; decals back to alpha 0,
+    puddles back to neutral grey)."""
+    kind = kind or ("DECALS" if decal else "PAINT")
     if value > 0:
         _fill(img, (1.0, 1.0, 1.0, 1.0))
     else:
-        _fill(img, EMPTY_DECAL if decal else EMPTY)
+        _fill(img, empty_value(kind))
     img.update()
     store(img)
 

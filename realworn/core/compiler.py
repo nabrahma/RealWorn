@@ -10,6 +10,10 @@ Rules
   its mask, and the one shared height (metres) goes to the material's Displacement as bump.
 - Lean: a hidden layer, or one with nothing to show (nothing painted, no decal image), has no
   nodes; Breakup at Amount 0, Edge Darkening at 0 and a missing height add no nodes.
+- Puddle (core/puddle.py) is the one kind without the mask recipe: its water stands where a water
+  level is above the ground, as depth d per point. While a material has a Puddle layer the stack
+  also carries the Principled Coat channels (the water is a clear coat at IOR 1.33), and the
+  relief becomes a Bump node whose Strength fades with water depth; without one, neither exists.
 - Value changes (on_value) write into the named node; only structural changes recompile, so
   EEVEE does not rebuild shaders while a slider is dragged.
 - Only this module creates or deletes nodes inside RW_Stack::<material>.
@@ -22,10 +26,13 @@ import bpy
 
 from . import kinds as K
 from . import naming
+from . import puddle as PD
 from ..builders._dsl import SOCKET_TYPES, Tree
 
 _suspended = set()
 SOURCE_VIEW = {}  # material name -> layer id: Mask View shows that layer's raw source (Bake Edges and AO)
+PUDDLE_PROBE = {}  # material name -> "water" | "deep" | "edge" | "halo" | "wet" | "depth" (d / 40 + 0.5) |
+#                    "relief" | "gate" | "color" | "roughness" | "coat": tests read one quantity through Mask View
 COMPILES = {"count": 0}  # tests read this to prove value edits do not recompile
 BOX_BLEND = 0.3          # SET-3: the classic Box projection blend
 _LAYER_PATH = re.compile(r"^realworn\.layers\[(\d+)\](?:\.(texture))?$")
@@ -70,7 +77,37 @@ def ensure_group(mat):
     for name, stype in naming.STACK_OUTPUTS:
         if (name, "OUTPUT") not in have:
             g.interface.new_socket(name, in_out="OUTPUT", socket_type=SOCKET_TYPES[stype])
+    _coat_sockets(mat, g, wants_coat(mat))
     return g
+
+
+def wants_coat(mat):
+    """The Coat channels go through the stack only while the material has a Puddle layer."""
+    return any(ly.kind == "PUDDLE" for ly in mat.realworn.layers)
+
+
+def has_coat(g):
+    return g is not None and any(i.item_type == "SOCKET" and i.in_out == "INPUT" and i.name == "Coat Weight"
+                                 for i in g.interface.items_tree)
+
+
+def _coat_sockets(mat, g, want):
+    if want == has_coat(g):
+        return
+    if want:
+        for name, stype, default in naming.COAT_INPUTS:
+            s = g.interface.new_socket(name, in_out="INPUT", socket_type=SOCKET_TYPES[stype])
+            if default is None:
+                s.hide_value = True
+            else:
+                s.default_value = default
+        for name, stype, _ in naming.COAT_INPUTS:
+            g.interface.new_socket(name, in_out="OUTPUT", socket_type=SOCKET_TYPES[stype])
+        return
+    from . import injector
+    injector.unroute_coat(mat)  # put the Principled's own coat sources back before the sockets go
+    for item in [i for i in g.interface.items_tree if i.item_type == "SOCKET" and i.name in naming.COAT_CHANNELS]:
+        g.interface.remove(item)
 
 
 def _group_io(g):
@@ -103,6 +140,8 @@ class _B(Tree):
         self._mark = 0
         self.base_channels = {}
         self.source_view = None
+        self.base_v = None       # the Base's height map value (0..1), for Puddle
+        self.base_h = None       # the Base's height in metres
 
     def begin(self, lid):
         self.lid = lid
@@ -400,6 +439,196 @@ def blend(b, layer, mask, lay, cur, ctx):
         ctx["height"] = b.mixf(mask, ctx["height"] if ctx["height"] is not None else 0.0, lay["height"])
 
 
+# ---------------------------------------------------------------- puddle
+PUDDLE_VALUES = ("water_level_mm", "height_scale_mm", "paint_depth_mm", "dip_depth_mm", "depth_look_mm", "halo",
+                 "edge_width_mm", "halo_width_mm", "deep_threshold_mm", "darkening", "flat_threshold",
+                 "wind_ripple", "tide_mark", "debris_settle")
+PUDDLE_LEAN = ("wind_ripple", "tide_mark", "debris_settle")  # nodes only above 0: crossing 0 recompiles
+
+
+def _pv(b, layer, prop):
+    """The Value node that carries one Puddle property (value edits write into it)."""
+    return b.value_node("pud." + prop, getattr(layer, prop))
+
+
+def _height_range(ts):
+    """(lo, hi): the base height map's 2nd and 98th percentiles, measured once per image."""
+    if ts.height is None:
+        return 0.0, 1.0
+    if ts.height_measured != ts.height.name:
+        try:
+            from . import pbrset
+            pbrset.measure_height(ts)
+        except (AttributeError, RuntimeError, ValueError):
+            return 0.0, 1.0  # cannot write here (a draw or depsgraph context); measured on the next compile
+    return ts.height_lo, ts.height_hi
+
+
+def _smooth(b, d, lo, hi, role):
+    n = b.named("ShaderNodeMapRange", role, props={"interpolation_type": "SMOOTHSTEP", "clamp": True})
+    b.set(n.inputs["Value"], d)
+    b.set(n.inputs[1], lo)
+    b.set(n.inputs[2], hi)
+    n.inputs[3].default_value, n.inputs[4].default_value = 0.0, 1.0
+    return n.outputs["Result"]
+
+
+def _puddle_ground(b, mat, layer, ctx):
+    """H in millimetres (Height Source), or None for a flat ground."""
+    st = mat.realworn
+    if layer.height_source == "NONE":
+        return None
+    H = None
+    if b.base_v is not None:
+        lo, hi = _height_range(st.base)
+        span = max(hi - lo, 0.02)
+        bn = b.math("MULTIPLY_ADD", b.base_v, 1.0 / span, -(lo + hi) / 2.0 / span, label="base height -0.5..0.5")
+        H = b.mul(bn, _pv(b, layer, "height_scale_mm"))
+    if layer.height_source == "STACK" and ctx["height"] is not None:
+        extra = ctx["height"] if b.base_h is None else b.sub(ctx["height"], b.base_h)
+        extra = b.mul(extra, 1000.0)
+        H = extra if H is None else b.add(H, extra)
+    return H
+
+
+def puddle(b, mat, layer, cur, ctx, view=False):
+    """Water where the water level is above the ground: depth d = L - H' per point (core/puddle.py),
+    then porosity darkening, absorption with depth, a clear coat at IOR 1.33 and a relief fade."""
+    st = mat.realworn
+    painted = layer.puddle_source != "AUTO" and layer.mask_image is not None
+    if layer.puddle_source == "PAINT" and not painted:
+        return  # Paint only, nothing painted yet: no water anywhere (lean)
+    op = b.named("ShaderNodeMath", "opacity", props={"operation": "MULTIPLY"})
+    op.inputs[0].default_value, op.inputs[1].default_value = 1.0, layer.opacity
+    op = op.outputs[0]
+    # ground the water sees: H' = H - dips - paint
+    H = _puddle_ground(b, mat, layer, ctx)
+    Hp = H if H is not None else 0.0
+    if layer.broad_dips or (b.base_v is None and layer.height_source != "NONE"):
+        mp = b.named("ShaderNodeMapping", "pud.dip_map")
+        sc = 1.0 / max(layer.dip_scale_m, 1e-3)
+        mp.inputs["Scale"].default_value = (sc, sc, sc)
+        b.links.new(b.shared("ShaderNodeTexCoord", "texcoord").outputs["Object"], mp.inputs["Vector"])
+        nz = b.named("ShaderNodeTexNoise", "pud.dip_noise", Scale=1.0, Detail=1.0, Roughness=0.5)
+        b.links.new(mp.outputs["Vector"], nz.inputs["Vector"])
+        dips = b.smooth(nz.outputs["Fac"], 0.35, 0.65, label="broad dips")
+        Hp = b.sub(Hp, b.mul(dips, _pv(b, layer, "dip_depth_mm")))
+    if painted:
+        P = b.math("MULTIPLY_ADD", _painted(b, layer), 2.0, -1.0, label="paint: -1 raise .. 1 lower")
+        P = b.math("MAXIMUM", b.math("MINIMUM", P, 1.0), -1.0)
+        pdep = _pv(b, layer, "paint_depth_mm")
+        Hp = b.sub(Hp, b.mul(P, pdep))
+        if layer.puddle_source == "PAINT":
+            lift = b.mul(b.inv(P), b.add(pdep, PD.PAINT_LIFT))
+            Hp = b.add(Hp, lift)
+    L = _pv(b, layer, "water_level_mm")
+    d = b.sub(L, Hp)
+    # flat faces only
+    thr = _pv(b, layer, "flat_threshold")
+    _, _, nzc = b.sep(_geometry_normal(b))
+    gate = _smooth(b, nzc, b.sub(thr, PD.FLAT_SOFT[0]), b.add(thr, PD.FLAT_SOFT[1]), "pud.flat")
+    d = b.mixf(gate, PD.DRY_DEPTH, d, label="d (mm), dry on walls")
+    # zones
+    edge_w, halo_w = _pv(b, layer, "edge_width_mm"), _pv(b, layer, "halo_width_mm")
+    W = _smooth(b, d, -PD.WATERLINE, PD.WATERLINE, "pud.water")
+    D = _smooth(b, d, 0.0, _pv(b, layer, "deep_threshold_mm"), "pud.deep")
+    neg_e = b.mul(edge_w, -1.0)
+    E = _smooth(b, d, neg_e, 0.0, "pud.edge")
+    outer = b.sub(neg_e, b.mul(halo_w, _pv(b, layer, "halo")))
+    Hh = _smooth(b, d, outer, neg_e, "pud.halo")
+    wet = b.max(b.mul(Hh, PD.HALO_WETNESS), E)
+    Wo, Do, Eo, Ho, weto = b.mul(W, op), b.mul(D, op), b.mul(E, op), b.mul(Hh, op), b.mul(wet, op)
+    # colour: porosity darkening, then the ground seen through the water
+    por = b.maprange(cur["Roughness"], 0.5, 0.9, label="porosity")
+    k = b.mul_all(b.inv(cur["Metallic"]), por, weto, _pv(b, layer, "darkening"))
+    keep = b.math("MULTIPLY_ADD", k, -(1.0 - PD.DARKEST), 1.0, label="wet: keep")
+    c_wet = b.mix(1.0, cur["Base Color"], keep, blend="MULTIPLY")
+    look = _pv(b, layer, "depth_look_mm")
+    if layer.water_tint == "MUDDY":
+        look = b.mul(look, PD.MUDDY_ABSORPTION)
+    a = b.math("EXPONENT", b.div(b.mul(b.max(d, 0.0), -1.0), b.max(look, 1e-3)), label="absorption")
+    tint = tuple(layer.tint_color) if layer.water_tint == "CUSTOM" else PD.TINTS[layer.water_tint]
+    c_under = b.mix(a, b.rgb_node("pud.tint", tint), c_wet)
+    col = b.mix(Wo, c_wet, c_under)
+    if layer.debris_settle > 0:
+        dk = b.math("MULTIPLY_ADD", b.mul(Do, _pv(b, layer, "debris_settle")), -PD.DEBRIS, 1.0)
+        col = b.mix(1.0, col, dk, blend="MULTIPLY")
+    if layer.tide_mark > 0:
+        band = b.mul_all(Ho, b.inv(Ho, clamp=False), 4.0, _pv(b, layer, "tide_mark"))
+        col = b.mix(1.0, col, b.math("MULTIPLY_ADD", band, -PD.TIDE, 1.0), blend="MULTIPLY")
+    cur["Base Color"] = col
+    # roughness
+    r = b.mul(cur["Roughness"], b.math("MULTIPLY_ADD", Ho, -(1.0 - PD.HALO_ROUGHNESS), 1.0))
+    r = b.mul(r, b.math("MULTIPLY_ADD", Eo, -(1.0 - PD.EDGE_ROUGHNESS / PD.HALO_ROUGHNESS), 1.0))
+    cur["Roughness"] = b.mixf(Wo, r, PD.WATER_ROUGHNESS)
+    # the water is a clear coat
+    if "Coat Weight" in cur:
+        cur["Coat Weight"] = b.max(cur["Coat Weight"], Eo)
+        cr = b.mixf(D, b.mixf(W, PD.COAT_ROUGHNESS[0], PD.COAT_ROUGHNESS[1]), PD.COAT_ROUGHNESS[2])
+        cur["Coat Roughness"] = b.mixf(Eo, cur["Coat Roughness"], cr)
+        cur["Coat IOR"] = b.mixf(Eo, cur["Coat IOR"], PD.COAT_IOR)
+        flat = cur["Coat Normal"]
+        if layer.wind_ripple > 0:
+            rip = b.named("ShaderNodeTexNoise", "pud.ripple", Scale=PD.RIPPLE_SCALE, Detail=3.0, Roughness=0.6)
+            b.links.new(b.shared("ShaderNodeTexCoord", "texcoord").outputs["Object"], rip.inputs["Vector"])
+            bump = b.named("ShaderNodeBump", "pud.ripple_bump", Distance=0.0004)
+            b.set(bump.inputs["Strength"], b.mul(Do, _pv(b, layer, "wind_ripple")))
+            b.links.new(rip.outputs["Fac"], bump.inputs["Height"])
+            b.set(bump.inputs["Normal"], flat)
+            flat = bump.outputs["Normal"]
+        if not layer.true_depth:
+            ctx["coat_flat"].append((Wo, flat))
+        else:
+            cur["Coat Normal"] = flat
+        if layer.water_tint == "OILY":
+            nz = b.named("ShaderNodeTexNoise", "pud.oil", Scale=PD.OILY_SCALE, Detail=2.0, Roughness=0.5)
+            b.links.new(b.shared("ShaderNodeTexCoord", "texcoord").outputs["Object"], nz.inputs["Vector"])
+            film = b.mul_all(b.smooth(nz.outputs["Fac"], 0.45, 0.6), Wo, PD.OILY_FILM_NM)
+            cur["Thin Film Thickness"] = b.max(cur["Thin Film Thickness"], film)
+    # relief: shading only fades the bump by depth (built after the last layer); True Depth
+    # displaces the ground and holds the water flat at the level
+    if layer.true_depth:
+        held = b.mixf(gate, Hp, b.max(Hp, L), label="water held flat at the level (flat faces)")
+        ctx["height"] = b.mul(held, 0.001)
+    else:
+        fade = b.mul(a, b.inv(D))
+        s = b.inv(b.mul(op, b.inv(fade)))
+        ctx["relief"] = s if ctx["relief"] is None else b.mul(ctx["relief"], s)
+    ctx["coverage"] = weto if ctx["coverage"] is None else b.max(ctx["coverage"], weto)
+    probe = PUDDLE_PROBE.get(mat.name)
+    if probe is not None or view:
+        if probe is not None:
+            ctx["mask_view"] = {"water": Wo, "deep": Do, "edge": Eo, "halo": Ho, "wet": weto,
+                                "depth": b.math("MULTIPLY_ADD", d, 1.0 / 40.0, 0.5, clamp=True),
+                                "relief": ctx["relief"] if ctx["relief"] is not None else 1.0,
+                                "gate": gate, "color": cur["Base Color"], "roughness": cur["Roughness"],
+                                "coat": cur.get("Coat Weight", 0.0)}[probe]
+        else:
+            ctx["mask_view"] = Wo
+        v = PD.VIEW_COLORS
+        c = b.mix(Ho, v["dry"], v["halo"])
+        c = b.mix(Eo, c, v["edge"])
+        c = b.mix(Wo, c, v["shallow"])
+        ctx["mask_color"] = b.mix(Do, c, v["deep"]) if probe is None else ctx["mask_view"]
+
+
+def _relief(b, cur, ctx):
+    """With a Puddle layer the stack's height becomes a Bump node whose Strength fades under the
+    water (Displacement is then left unplugged); the water's coat normal is flat."""
+    if ctx["relief"] is None:
+        return
+    if ctx["height"] is not None:
+        bump = b.named("ShaderNodeBump", "relief", Distance=1.0)
+        b.set(bump.inputs["Strength"], ctx["relief"])
+        b.set(bump.inputs["Height"], ctx["height"])
+        b.set(bump.inputs["Normal"], cur["Normal"])
+        cur["Normal"] = bump.outputs["Normal"]
+        ctx["height"] = None
+    if "Coat Normal" in cur:
+        for w, flat in ctx["coat_flat"]:
+            cur["Coat Normal"] = b.vmath("NORMALIZE", b.mixv(w, cur["Normal"], flat))
+
+
 # ---------------------------------------------------------------- compile
 def _base(b, mat, cur, ctx):
     """The Base: the wrapped material, or a texture set loaded onto it (then it replaces the
@@ -415,6 +644,9 @@ def _base(b, mat, cur, ctx):
     cur["Metallic"] = ts["metallic"] if ts["metallic"] is not None else 0.0
     cur["Normal"] = _geometry_normal(b)
     ctx["height"] = ts["height"]
+    hnode = b.nodes.get(naming.layer_node("base", "tex.height"))
+    if hnode is not None:
+        b.base_v, b.base_h = hnode.outputs["Color"], ts["height"]
 
 
 def compile(mat):
@@ -427,8 +659,12 @@ def compile(mat):
     gi.location, go.location = (-700, 0), (300, 0)
     b = _B(g, gi, go)
     st = mat.realworn
+    coat = has_coat(g)
     cur = {name: gi.outputs[name] for name, _, _ in naming.STACK_INPUTS}
-    ctx = {"height": None, "coverage": None, "mask_view": None}
+    if coat:
+        cur.update({name: gi.outputs[name] for name in naming.COAT_CHANNELS})
+    ctx = {"height": None, "coverage": None, "mask_view": None, "mask_color": None, "relief": None,
+           "coat_flat": []}
     b.begin("base")
     _base(b, mat, cur, ctx)
     b.base_channels = dict(cur)  # Tint Below recolours a copy of the Base
@@ -439,6 +675,11 @@ def compile(mat):
             continue
         b.begin(layer.id)
         b.source_view = None
+        if layer.kind == "PUDDLE":
+            view = st.mask_view and idx == active and not st.base_active
+            puddle(b, mat, layer, cur, ctx, view)
+            b.end(600 * (idx + 1), "{}: {}".format(K.label(layer.kind), layer.name))
+            continue
         mask = build_mask(b, layer)
         if b.source_view is not None:
             ctx["mask_view"] = b.source_view
@@ -450,9 +691,13 @@ def compile(mat):
                 ctx["mask_view"] = mask
         b.end(600 * (idx + 1), "{}: {}".format(K.label(layer.kind), layer.name))
     b.begin("stack")
-    for name in naming.CHANNELS:
+    _relief(b, cur, ctx)
+    for name in naming.CHANNELS + (naming.COAT_CHANNELS if coat else ()):
         b.set(go.inputs[name], cur[name])
-    for name, key in (("Displacement", "height"), ("Coverage", "coverage"), ("Mask View", "mask_view")):
+    if ctx["mask_color"] is None and ctx["mask_view"] is not None:
+        ctx["mask_color"] = ctx["mask_view"]
+    for name, key in (("Displacement", "height"), ("Coverage", "coverage"), ("Mask View", "mask_view"),
+                      ("Mask Color", "mask_color")):
         if ctx[key] is not None:
             b.set(go.inputs[name], ctx[key])
     go.location = (600 * (len(st.layers) + 1) + 400, 0)
@@ -464,6 +709,7 @@ def after_compile(mat):
     """Keep what lives outside the group in step: the owned Displacement node, True depth."""
     from . import injector, reveal
     injector.sync_outputs(mat)
+    injector.sync_coat(mat)
     reveal.sync(mat)
 
 
@@ -497,10 +743,29 @@ def _texture_targets(lid, ts, prop):
     return None
 
 
+def _puddle_targets(g, layer, prop):
+    lid = layer.id
+    if prop in PUDDLE_VALUES:
+        if prop in PUDDLE_LEAN and (getattr(layer, prop) <= 0) != (g.nodes.get(naming.layer_node(lid, "pud." + prop))
+                                                                  is None):
+            return None
+        return [(lid, "pud." + prop, None, getattr(layer, prop))]
+    if prop == "dip_scale_m":
+        sc = 1.0 / max(layer.dip_scale_m, 1e-3)
+        return [(lid, "pud.dip_map", "Scale", (sc, sc, sc))]
+    if prop == "tint_color":
+        return [(lid, "pud.tint", None, tuple(layer.tint_color))] if layer.water_tint == "CUSTOM" else []
+    if prop == "opacity":
+        return [(lid, "opacity", 1, layer.opacity)]
+    return None
+
+
 def _layer_targets(g, layer, prop):
     """[(lid, role, socket, value)] for a value property of a layer; None means recompile."""
     lid = layer.id
     has = lambda role: g.nodes.get(naming.layer_node(lid, role)) is not None  # noqa: E731
+    if layer.kind == "PUDDLE":
+        return _puddle_targets(g, layer, prop)
     if prop == "opacity":
         return [(lid, "opacity", 1, layer.opacity)]
     if prop == "color":

@@ -150,6 +150,24 @@ def assign(ts, paths, scale=None):
     return done
 
 
+def measure_height(ts, step=4):
+    """The height map's 2nd and 98th percentiles (0..1) on every `step`-th pixel, stored on the set.
+    Puddle layers normalise the ground by them, so a map that uses only part of 0..1 still spans
+    the full Height Scale. Measured once per image (the first time a Puddle needs it)."""
+    import numpy as np
+    from . import images, puddle
+    img = ts.height
+    if img is None:
+        return 0.0, 1.0
+    px = images.pixels(img)[::step, ::step, 0]
+    lo, hi = puddle.height_range(px) if px.size else (0.0, 1.0)
+    if not np.isfinite(lo) or not np.isfinite(hi):
+        lo, hi = 0.0, 1.0
+    ts.height_lo, ts.height_hi = lo, hi
+    ts.height_measured = img.name
+    return lo, hi
+
+
 def clear(ts):
     for ch in ("color", "roughness", "metallic", "height", "normal", "ao", "packed"):
         setattr(ts, ch, None)

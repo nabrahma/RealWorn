@@ -14,6 +14,11 @@ Height (SET-4): the stack's one shared height (metres) feeds an owned Displaceme
 It is added to the material's own displacement, or replaces it once a texture set is loaded onto
 the Base (the set is then the base look).
 
+Coat (Puddle): while the material has a Puddle layer the stack also carries the Principled's Coat
+channels (sync_coat): each one's own source goes into the stack and the stack's output into the
+Principled. When the last Puddle goes, unroute_coat puts every source back as it was, so the tree
+is the same as if no Puddle had ever been added.
+
 Remove deletes every owned node and restores links, defaults and layout from the snapshot, then
 checks the tree equals it.
 
@@ -268,7 +273,7 @@ def _restore_surgical(mat):
     if st.baked:
         bake.restore_live(mat)
     for stack in stacks(tree):
-        for ch in naming.CHANNELS:
+        for ch in naming.CHANNELS + naming.COAT_CHANNELS:
             _relink_around(tree, stack, ch, ch)
     mix = nodeutil.find(tree, "overlay_mix")
     if mix is not None:
@@ -294,6 +299,59 @@ def _restore_surgical(mat):
     _drop_group(mat)
     reveal.restore(mat)
     return []
+
+
+# ------------------------------------------------------------------- coat
+def _principled_of(tree, stack):
+    return tree.nodes.get(stack.get("rw_principled", ""))
+
+
+def _geom_of(tree, stack):
+    idx = stack.name.rsplit(".", 1)[-1]
+    return nodeutil.find(tree, "geom.{}".format(idx))
+
+
+def sync_coat(mat):
+    """Route the Principled's Coat channels through the stack while it has the Coat sockets (a
+    Puddle layer exists). Idempotent; never changes a Principled default value."""
+    tree = mat.node_tree
+    st = mat.realworn
+    if tree is None or st.stack is None or not st.applied or st.baked:
+        return
+    for stack in stacks(tree):
+        p = _principled_of(tree, stack)
+        if p is None or stack.inputs.get("Coat Weight") is None:
+            continue
+        for ch in naming.COAT_CHANNELS:
+            sin, sout, pin = stack.inputs.get(ch), stack.outputs.get(ch), None
+            if sin is None or sout is None or p.inputs.get(ch) is None:
+                continue
+            pin = channel_target(tree, p, ch)
+            if any(l.from_node == stack for l in pin.links):
+                continue  # already routed
+            src = nodeutil.link_source(pin)
+            if src is not None and nodeutil.is_foreign(src.node):
+                src = None
+            if src is not None:
+                tree.links.new(src, sin)
+            elif ch in naming.NORMAL_CHANNELS:
+                geom = _geom_of(tree, stack)
+                if geom is not None:
+                    tree.links.new(geom.outputs["Normal"], sin)
+            else:
+                sin.default_value = pin.default_value
+            tree.links.new(sout, pin)
+
+
+def unroute_coat(mat):
+    """Before the Coat sockets leave the stack: each channel's own source feeds the Principled
+    again (unlinked channels simply keep their unchanged default)."""
+    tree = mat.node_tree
+    if tree is None:
+        return
+    for stack in stacks(tree):
+        for ch in naming.COAT_CHANNELS:
+            _relink_around(tree, stack, ch, ch)
 
 
 # ------------------------------------------------- outputs outside the stack
@@ -377,7 +435,8 @@ def set_mask_view(mat, state):
             emis = nodeutil.new(tree, "ShaderNodeEmission", "maskview", frame=nodeutil.ensure_frame(tree))
             x, y = _abs(out)
             _place(emis, x, y + 200)
-        tree.links.new(st[0].outputs["Mask View"], emis.inputs["Color"])
+        view = st[0].outputs.get("Mask Color") or st[0].outputs["Mask View"]
+        tree.links.new(view, emis.inputs["Color"])
         tree.links.new(emis.outputs[0], out.inputs["Surface"])
         return True
     if emis is None:

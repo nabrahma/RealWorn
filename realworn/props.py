@@ -11,6 +11,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        IntProperty, PointerProperty, StringProperty)
 
 from .core import kinds as K
+from .core import puddle as P
 
 KIND_ITEMS = [(k, K.label(k), "New {} layer".format(K.label(k)), K.INFO[k]["icon"], i)
               for i, k in enumerate(K.KINDS)]
@@ -27,6 +28,20 @@ UV_ITEMS = [("CUBE", "Cube Projection", "Cube Projection then Pack Islands (the 
             ("EXISTING", "Use Existing", "Copy the object's own UV map (clean, non-overlapping layouts)")]
 RES_ITEMS = [(str(r), str(r), "") for r in (256, 512, 1024, 2048, 4096)]
 DECAL_RES_ITEMS = [("2048", "2K", ""), ("4096", "4K", "Recommended"), ("8192", "8K", "Large buildings")]
+PUDDLE_PRESET_ITEMS = [(k, n, "Water level, halo and depth look: {}".format(n.lower())) for k, n, _ in P.PRESETS]
+SURFACE_ITEMS = [("NONE", "Custom", "Keep your own Height Scale and dip settings")] + [
+    (k, n, "Height Scale and broad dips for {}".format(n.lower())) for k, n, _ in P.SURFACES]
+PUDDLE_SOURCE_ITEMS = [("AUTO", "Auto", "Water collects in the low spots of the ground, nothing painted"),
+                       ("PAINT", "Paint", "Water only where you paint (it still follows the ground)"),
+                       ("AUTO_AND_PAINT", "Auto and Paint",
+                        "Auto puddles, plus painting to add (white) or dry out (black) spots")]
+HEIGHT_SOURCE_ITEMS = [("STACK", "Stack", "The base height plus what the layers below add (Reveal holes fill)"),
+                       ("BASE", "Base Only", "Only the base material's height map"),
+                       ("NONE", "None", "Flat: only Broad Dips and painting shape the water")]
+TINT_ITEMS = [("CLEAR", "Clear", "Clean rain water: dark, cool, see-through"),
+              ("MUDDY", "Muddy", "Brown water that hides the ground quickly"),
+              ("OILY", "Oily", "Clear water with an iridescent sheen in patches"),
+              ("CUSTOM", "Custom", "Your own tint colour")]
 EXPORT_ITEMS = [("UNITY_URP", "Unity URP", "BaseMap, MetallicSmoothness, Normal (OpenGL)"),
                 ("UNITY_HDRP", "Unity HDRP", "BaseColor, MaskMap (M, AO, Detail, Smoothness), Normal (OpenGL)"),
                 ("UNREAL", "Unreal ORM", "BaseColor, ORM (AO, Rough, Metal), Normal (DirectX)"),
@@ -57,6 +72,36 @@ def _true_depth(self, context):
     from .core import compiler, reveal
     reveal.sync(self.id_data)
     compiler.on_struct(self)
+
+
+def _puddle_preset(self, context):
+    from .core import compiler
+    mat = self.id_data
+    with compiler.batch(mat):
+        for k, v in P.preset_values(self.puddle_preset).items():
+            setattr(self, k, v)
+    compiler.on_struct(self)
+
+
+def _surface(self, context):
+    from .core import compiler
+    if self.surface == "NONE":
+        return
+    mat = self.id_data
+    with compiler.batch(mat):
+        for k, v in P.preset_values(self.surface, P.SURFACES).items():
+            setattr(self, k, v)
+    compiler.on_struct(self)
+
+
+def _puddle_outline_items(self, context):
+    from .core import grunge
+    return grunge.puddle_outline_items()
+
+
+def _pick_puddle_outline(self, context):
+    from .core import grunge
+    grunge.set_puddle_outline(self.puddle_outline)
 
 
 def _library_items(self, context):
@@ -117,6 +162,12 @@ class RWTextureSet(bpy.types.PropertyGroup):
                         update=_v("bump"), description="Displacement Scale: metres of height "
                                                        "over the height map's 0..1")
 
+    # the height map's 2nd / 98th percentiles (0..1), measured once: Puddle normalises by them
+    height_lo: FloatProperty(name="Height Low", default=0.0, options={"HIDDEN"})
+    height_hi: FloatProperty(name="Height High", default=1.0, options={"HIDDEN"})
+    height_measured: StringProperty(name="Height Measured", default="", options={"HIDDEN"},
+                                    description="Name of the height image the range was measured on")
+
     def loaded(self):
         return self.color is not None or self.packed is not None or self.height is not None
 
@@ -174,6 +225,53 @@ class RWLayer(bpy.types.PropertyGroup):
     bevel_samples: IntProperty(name="Bevel Samples", default=8, min=1, max=128, update=_v("bevel_samples"))
     decal_blend: EnumProperty(name="Blend", items=DECAL_BLEND_ITEMS, default="NORMAL", update=_struct)
     decal_res: EnumProperty(name="Resolution", items=DECAL_RES_ITEMS, default="4096")
+    # Puddle (core/puddle.py): water where the water level is above the ground; depths in mm
+    puddle_preset: EnumProperty(name="Preset", items=PUDDLE_PRESET_ITEMS, default=P.DEFAULT_PRESET,
+                                update=_puddle_preset)
+    puddle_source: EnumProperty(name="Source", items=PUDDLE_SOURCE_ITEMS, default="AUTO_AND_PAINT", update=_struct)
+    height_source: EnumProperty(name="Height Source", items=HEIGHT_SOURCE_ITEMS, default="STACK", update=_struct)
+    surface: EnumProperty(name="Surface", items=SURFACE_ITEMS, default="NONE", update=_surface,
+                          description="Sets Height Scale and Broad Dips for a kind of ground")
+    height_scale_mm: FloatProperty(name="Height Scale", default=10.0, min=0.1, soft_max=50.0,
+                                   update=_v("height_scale_mm"),
+                                   description="Millimetres the base height map's range spans for the water")
+    water_level_mm: FloatProperty(name="Water Level", default=-2.0, soft_min=-15.0, soft_max=15.0,
+                                  update=_v("water_level_mm"),
+                                  description="Raises or lowers every puddle together: down for water only in "
+                                              "cracks, up for large pools (mm)")
+    paint_depth_mm: FloatProperty(name="Paint Depth", default=20.0, min=0.0, soft_max=60.0,
+                                  update=_v("paint_depth_mm"),
+                                  description="How far painting lowers (white) or raises (black) the ground (mm)")
+    broad_dips: BoolProperty(name="Broad Dips", default=False, update=_struct,
+                             description="Large soft dips in the ground (always on when the base has no height map)")
+    dip_depth_mm: FloatProperty(name="Dip Depth", default=15.0, min=0.0, soft_max=60.0, update=_v("dip_depth_mm"))
+    dip_scale_m: FloatProperty(name="Dip Size", default=2.5, min=0.1, soft_max=10.0, subtype="DISTANCE",
+                               update=_v("dip_scale_m"), description="Size of the broad dips in metres")
+    depth_look_mm: FloatProperty(name="Depth Look", default=8.0, min=0.2, soft_max=40.0, update=_v("depth_look_mm"),
+                                 description="How quickly the ground fades under the water (mm)")
+    halo: FloatProperty(name="Halo", default=1.0, min=0.0, soft_max=3.0, update=_v("halo"),
+                        description="How far the damp ring around the water spreads")
+    edge_width_mm: FloatProperty(name="Wet Edge", default=1.5, min=0.05, soft_max=10.0, update=_v("edge_width_mm"),
+                                 description="Width of the wet, glossy band (mm of depth)")
+    halo_width_mm: FloatProperty(name="Halo Width", default=6.0, min=0.0, soft_max=30.0, update=_v("halo_width_mm"),
+                                 description="Width of the damp halo (mm of depth)")
+    deep_threshold_mm: FloatProperty(name="Deep From", default=6.0, min=0.1, soft_max=30.0,
+                                     update=_v("deep_threshold_mm"),
+                                     description="Water deeper than this is a flat mirror (mm)")
+    darkening: FloatProperty(name="Darkening", default=1.0, min=0.0, max=1.0, update=_v("darkening"),
+                             description="How much wet porous ground darkens")
+    water_tint: EnumProperty(name="Water Tint", items=TINT_ITEMS, default="CLEAR", update=_struct)
+    tint_color: FloatVectorProperty(name="Tint", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                    default=P.TINTS["CLEAR"], update=_v("tint_color"))
+    flat_threshold: FloatProperty(name="Flat Faces", default=0.92, min=0.0, max=1.0, update=_v("flat_threshold"),
+                                  description="Water only stands where the face points up at least this much "
+                                              "(normal Z)")
+    wind_ripple: FloatProperty(name="Wind Ripple", default=0.0, min=0.0, max=1.0, update=_v("wind_ripple"),
+                               description="A faint static ripple on deep water")
+    tide_mark: FloatProperty(name="Tide Mark", default=0.0, min=0.0, max=1.0, update=_v("tide_mark"),
+                             description="A faint darker ring at the outer edge of the damp halo")
+    debris_settle: FloatProperty(name="Debris Settle", default=0.0, min=0.0, max=1.0, update=_v("debris_settle"),
+                                 description="Darkening in the deepest water, like silt")
     show_advanced: BoolProperty(name="Advanced", default=False)
 
 
@@ -211,6 +309,8 @@ class RW_SceneProps(bpy.types.PropertyGroup):
     grunge: EnumProperty(name="Grunge", items=_grunge_items)
     damage_alpha: EnumProperty(name="Damage Alpha", items=_alpha_items, update=_pick_alpha)
     decal_image: EnumProperty(name="Decal", items=_decal_items, update=_pick_decal)
+    puddle_outline: EnumProperty(name="Puddle Outline", items=_puddle_outline_items, update=_pick_puddle_outline,
+                                 description="A grunge for ragged puddle outlines (the Puddle brush's mask)")
     bake_resolution: EnumProperty(name="Resolution", items=RES_ITEMS, default="2048")
     bake_folder: StringProperty(name="Folder", default="//rw_bake/", subtype="DIR_PATH")
     export_preset: EnumProperty(name="Engine", items=EXPORT_ITEMS, default="UNREAL")

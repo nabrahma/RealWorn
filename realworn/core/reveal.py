@@ -1,4 +1,4 @@
-"""Reveal's True depth (REV-5): the material switches to Displacement and Bump and the objects get
+"""True depth for Reveal and Puddle layers: the material switches to Displacement and Bump and the objects get
 an adaptive Simple subdivision (Cycles dices it; EEVEE uses the fixed viewport level). Off by
 default. Turning it off restores the material's own displacement method and
 removes the modifier."""
@@ -13,7 +13,7 @@ DENSE_EDGE = 0.02  # metres: a mesh edge longer than this is too coarse for mill
 
 
 def wants_true_depth(mat):
-    return any(ly.visible and ly.kind == "REVEAL" and ly.true_depth for ly in mat.realworn.layers)
+    return any(ly.visible and ly.kind in ("REVEAL", "PUDDLE") and ly.true_depth for ly in mat.realworn.layers)
 
 
 def subdiv_modifier(obj):
