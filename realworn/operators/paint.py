@@ -85,7 +85,7 @@ class RW_OT_mask_fill(_Target, bpy.types.Operator):
         if layer is None or not kinds.paintable(layer.kind):
             return {"CANCELLED"}
         img = images.ensure_mask(ob, mat, layer)
-        images.fill(img, self.value, decal=layer.kind == "DECALS")
+        images.fill(img, self.value, kind=layer.kind)
         return {"FINISHED"}
 
 

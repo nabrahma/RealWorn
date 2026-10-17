@@ -74,7 +74,14 @@ class RW_OT_decal_pick(_Popup, bpy.types.Operator):
     prop = "decal_image"
 
 
-_classes = (RW_OT_breakup_pick, RW_OT_damage_alpha_pick, RW_OT_decal_pick)
+class RW_OT_puddle_outline_pick(_Popup, bpy.types.Operator):
+    """Pick the Puddle brush's outline: round, or a grunge for ragged puddle edges"""
+    bl_idname = "realworn.puddle_outline_pick"
+    bl_label = "Puddle Outline"
+    prop = "puddle_outline"
+
+
+_classes = (RW_OT_breakup_pick, RW_OT_damage_alpha_pick, RW_OT_decal_pick, RW_OT_puddle_outline_pick)
 
 
 def register():

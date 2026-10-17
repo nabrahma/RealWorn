@@ -1,7 +1,7 @@
 """The RealWorn sidebar tab: one short panel.
 
   Setup / Remove
-  + Add: Variation | Paint | Reveal | Decals | Edge Wear | Dirt
+  + Add: Variation | Paint | Reveal | Decals | Edge Wear | Dirt | Puddle
   the layer rows (top of the list is the top layer; the Base pinned at the bottom)
   the selected layer: Content, its kind's control, Breakup, Sharpness, Brush, then > Advanced
   Bake Material, Export Textures, Bake Edges and AO
@@ -37,8 +37,21 @@ def _context_material(context):
     return ob, ob.active_material
 
 
+def eevee_without_raytracing(context):
+    scene = getattr(context, "scene", None) if context is not None else None
+    if scene is None or not scene.render.engine.startswith("BLENDER_EEVEE"):
+        return False
+    return not getattr(scene.eevee, "use_raytracing", True)
+
+
 def status(ob, layer, context=None):
     """UI-2: a short status note for a layer row, or ''."""
+    if layer.kind == "PUDDLE":
+        if layer.puddle_source == "PAINT" and layer.mask_image is None:
+            return "not painted"
+        if eevee_without_raytracing(context):
+            return "EEVEE: enable ray tracing"
+        return ""
     if layer.kind in ("EDGE_WEAR", "DIRT") and layer.edge_source == "LIVE":
         shading = getattr(getattr(context, "space_data", None), "shading", None) if context else None
         if shading is not None and shading.type == "MATERIAL":
@@ -66,7 +79,7 @@ class RW_UL_layers(bpy.types.UIList):
         note = status(context.active_object, item, context)
         if note:
             sub = row.row()
-            sub.alert = note.startswith("Live -")
+            sub.alert = note.startswith(("Live -", "EEVEE"))
             sub.label(text=note)
         sub = row.row(align=True)
         sub.scale_x = 0.8
@@ -121,6 +134,7 @@ def _add_row(layout):
     o.kind = "EDGE_WEAR"
     o = op(row, "realworn.layer_add", text="Dirt", icon=K.INFO["DIRT"]["icon"])
     o.kind = "DIRT"
+    row.menu("RW_MT_add_puddle", text="Puddle", icon=K.INFO["PUDDLE"]["icon"])
 
 
 def _hsv(layout, owner, prefix=""):
@@ -155,8 +169,86 @@ def draw_base(layout, mat):
         box.label(text="Your material, untouched. Load a texture to replace its look.", icon="INFO")
 
 
+def _mask_rows(layout, layer):
+    row = layout.row(align=True)
+    o = op(row, "realworn.upgrade_mask", text="Upgrade Mask")
+    o.layer = layer.id
+    o = op(row, "realworn.mask_fill", text="Fill")
+    o.layer, o.value = layer.id, 1.0
+    o = op(row, "realworn.mask_fill", text="Clear")
+    o.layer, o.value = layer.id, 0.0
+
+
+def draw_puddle(layout, context, ob, mat, layer):
+    """Puddle: Preset, Source, Water Level, Depth Look, Halo, Water Tint, True Depth, Brush; the
+    rest under Advanced."""
+    box = layout.box()
+    box.label(text="Selected: {}".format(layer.name), icon=K.INFO["PUDDLE"]["icon"])
+    col = box.column(align=True)
+    col.prop(layer, "puddle_preset")
+    col.prop(layer, "puddle_source")
+    col = box.column(align=True)
+    row = col.row(align=True)
+    row.prop(layer, "water_level_mm", text="Water Level (mm)", slider=True)
+    row.prop(layer, "depth_look_mm", text="Depth Look (mm)")
+    row = col.row(align=True)
+    row.prop(layer, "halo", slider=True)
+    row.prop(layer, "water_tint", text="")
+    if layer.water_tint == "CUSTOM":
+        col.prop(layer, "tint_color")
+    row = box.row(align=True)
+    row.prop(layer, "true_depth")
+    if layer.true_depth:
+        from ..core import reveal
+        warn = reveal.density_warning(ob)
+        if warn:
+            box.label(text=warn, icon="ERROR")
+    if layer.puddle_source != "AUTO":
+        row = box.row(align=True)
+        brush = context.scene.get("rw_puddle_outline", "NONE")
+        op(row, "realworn.puddle_outline_pick", text="Outline: " + ("Round" if brush in ("", "NONE") else
+                                                                     brush.rsplit(".", 1)[0]), icon="BRUSH_DATA")
+        o = op(row, "realworn.paint_enter", text="Paint", icon="BRUSH_DATA")
+        o.layer = layer.id
+    row = box.row(align=True)
+    row.prop(mat.realworn, "mask_view", text="Mask View", toggle=True)
+    if eevee_without_raytracing(context):
+        box.label(text="EEVEE: turn on Ray Tracing (Render Properties) for sharp reflections", icon="ERROR")
+    box.label(text=K.TIPS["PUDDLE"], icon="INFO")
+    adv = box.column(align=True)
+    adv.prop(layer, "show_advanced", icon="TRIA_DOWN" if layer.show_advanced else "TRIA_RIGHT", emboss=False)
+    if layer.show_advanced:
+        adv.prop(layer, "height_source")
+        adv.prop(layer, "surface")
+        adv.prop(layer, "height_scale_mm", text="Height Scale (mm)")
+        adv.prop(layer, "paint_depth_mm", text="Paint Depth (mm)")
+        row = adv.row(align=True)
+        row.prop(layer, "broad_dips")
+        if not mat.realworn.base.loaded() or mat.realworn.base.height is None:
+            row.label(text="on: the Base has no height map", icon="INFO")
+        row = adv.row(align=True)
+        row.prop(layer, "dip_depth_mm", text="Dip Depth (mm)")
+        row.prop(layer, "dip_scale_m")
+        row = adv.row(align=True)
+        row.prop(layer, "edge_width_mm", text="Wet Edge (mm)")
+        row.prop(layer, "halo_width_mm", text="Halo (mm)")
+        row.prop(layer, "deep_threshold_mm", text="Deep (mm)")
+        adv.prop(layer, "darkening", slider=True)
+        row = adv.row(align=True)
+        row.prop(layer, "wind_ripple", slider=True)
+        row.prop(layer, "tide_mark", slider=True)
+        row.prop(layer, "debris_settle", slider=True)
+        adv.prop(layer, "flat_threshold", slider=True)
+        if layer.puddle_source != "AUTO":
+            adv.prop(layer, "mask_res")
+            _mask_rows(adv, layer)
+
+
 def draw_layer(layout, context, ob, mat, layer):
     """UI-3: Content, kind-specific, Breakup, Sharpness, Brush; Advanced folded."""
+    if layer.kind == "PUDDLE":
+        draw_puddle(layout, context, ob, mat, layer)
+        return
     box = layout.box()
     box.label(text="Selected: {}".format(layer.name), icon=K.INFO[layer.kind]["icon"])
     # Content
@@ -249,13 +341,7 @@ def draw_layer(layout, context, ob, mat, layer):
             adv.prop(layer, "decal_blend")
         if K.paintable(layer.kind) and layer.kind != "DECALS":
             adv.prop(layer, "mask_res")
-        row = adv.row(align=True)
-        o = op(row, "realworn.upgrade_mask", text="Upgrade Mask")
-        o.layer = layer.id
-        o = op(row, "realworn.mask_fill", text="Fill")
-        o.layer, o.value = layer.id, 1.0
-        o = op(row, "realworn.mask_fill", text="Clear")
-        o.layer, o.value = layer.id, 0.0
+        _mask_rows(adv, layer)
 
 
 def _bake_rows(layout, mat):

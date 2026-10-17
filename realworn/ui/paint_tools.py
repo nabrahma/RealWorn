@@ -35,6 +35,7 @@ SHORTCUTS = {
     "RW Soft": "F size, Shift F strength, Ctrl erase",
     "RW Damage": "F size, Shift F strength, Ctrl erase; the alpha follows the stroke (Rake)",
     "RW Stencil": "Right-drag move, Ctrl right-drag rotate, Shift right-drag scale; Ctrl erases alpha",
+    "RW Puddle": "F size, Shift F strength; white lowers the ground (water collects), Ctrl raises it (dries out)",
 }
 
 

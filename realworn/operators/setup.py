@@ -98,7 +98,8 @@ class RW_OT_layer_add(bpy.types.Operator):
 
     kind: EnumProperty(name="Kind", items=KIND_ITEMS, default="PAINT")
     preset: StringProperty(name="Preset", default="", description="Washed Out, Dark Patches, Dirt Patches, "
-                                                                   "Second Material; Damage, Scratches; Graffiti, Grime")
+                                                                   "Second Material; Damage, Scratches; Graffiti, Grime; "
+                                                                   "Damp, Wet, Puddles, Soaked")
     object: StringProperty(name="Object", default="")
     material: StringProperty(name="Material", default="")
 
@@ -154,6 +155,17 @@ class RW_MT_add_decals(bpy.types.Menu):
         for key, name in kinds.preset_items("DECALS"):
             op = self.layout.operator("realworn.layer_add", text=name)
             op.kind, op.preset = "DECALS", key
+
+
+class RW_MT_add_puddle(bpy.types.Menu):
+    """Puddle presets: how wet the ground is"""
+    bl_idname = "RW_MT_add_puddle"
+    bl_label = "Add Puddle"
+
+    def draw(self, context):
+        for key, name in kinds.preset_items("PUDDLE"):
+            op = self.layout.operator("realworn.layer_add", text=name)
+            op.kind, op.preset = "PUDDLE", key
 
 
 class _LayerOp:
@@ -236,6 +248,7 @@ class RW_OT_layer_select(_LayerOp, bpy.types.Operator):
 
 
 _classes = (RW_OT_setup, RW_OT_remove, RW_OT_layer_add, RW_MT_add_variation, RW_MT_add_reveal, RW_MT_add_decals,
+            RW_MT_add_puddle,
             RW_OT_layer_remove, RW_OT_layer_move, RW_OT_layer_duplicate, RW_OT_layer_select)
 
 
