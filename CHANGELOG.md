@@ -6,6 +6,8 @@ All notable changes to RealWorn are listed here. The format follows
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-17
+
 ### Added
 - **Puddle layer**, the seventh kind: standing water where a water level is above the ground.
   - One click (Damp, Wet, Puddles, Soaked) fills the low spots of the base height map first: grout,
@@ -20,8 +22,15 @@ All notable changes to RealWorn are listed here. The format follows
   - Bake Material bakes the coat too.
 - The Coat channels go through the layer stack only while a material has a Puddle layer.
 - A reference road scene and a plain-node puddle reference for the tests (`python tests/corpus/fetch.py --road`).
+- Load Texture lists the texture sets of the RealIndex add-on when it is enabled, after the
+  library folder's sets.
 - Contributing guide, code of conduct, security policy, issue and pull request templates.
 - Continuous integration for the pure-Python tests.
+
+### Changed
+- RealWorn works alongside other add-ons' shader layers, such as RealDust's dust. It never edits
+  nodes another add-on owns, and keeps those layers on top through Setup, Bake Material and
+  Restore Live Stack. While they are present, Remove takes out only RealWorn's nodes.
 
 ## [3.0.0] - 2026-10-14
 
@@ -92,7 +101,8 @@ A rebuild around a simpler model: every layer is a material plus a mask.
 - First release: procedural masks, material injector with exact removal, presets, scene
   weather, projector decals, boolean damage, and bake to textures.
 
-[Unreleased]: https://github.com/nabrahma/RealWorn/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/nabrahma/RealWorn/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/nabrahma/RealWorn/compare/v3.0.0...v3.3.0
 [3.0.0]: https://github.com/nabrahma/RealWorn/compare/v2.1.0...v3.0.0
 [2.1.0]: https://github.com/nabrahma/RealWorn/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/nabrahma/RealWorn/compare/v0.7.0...v2.0.0
