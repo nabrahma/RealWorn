@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in RealWorn doesn't work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. A small .blend that shows the problem helps most.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Select the default cube and click Setup
+        2. Add > Reveal > Damage
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: realworn
+    attributes:
+      label: RealWorn version
+      placeholder: "3.0.0"
+    validations:
+      required: true
+  - type: input
+    id: blender
+    attributes:
+      label: Blender version
+      placeholder: "5.2.1"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: OS and GPU
+      placeholder: "Windows 11, RTX 3060 Laptop"
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Render engine
+      options:
+        - Cycles
+        - EEVEE
+        - Both
+        - Not related to rendering
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output
+      description: Any error from Blender's system console (Window > Toggle System Console on Windows).
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or files
+      description: Drag images or a zipped .blend here.

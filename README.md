@@ -1,5 +1,10 @@
 # RealWorn
 
+[![tests](https://github.com/nabrahma/RealWorn/actions/workflows/tests.yml/badge.svg)](https://github.com/nabrahma/RealWorn/actions/workflows/tests.yml)
+[![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Blender 5.2+](https://img.shields.io/badge/Blender-5.2%2B-orange.svg)](https://www.blender.org/download/)
+[![Latest release](https://img.shields.io/github/v/release/nabrahma/RealWorn)](https://github.com/nabrahma/RealWorn/releases/latest)
+
 Paintable texture layers for realistic buildings and surfaces in Blender, with no node editing.
 
 Click **Setup**, load your texture sets into a few simple layers, and paint. RealWorn builds the
@@ -49,8 +54,8 @@ Remove restores your original material exactly.
 
 ## Install
 
-1. Build the package: `python scripts/package.py` writes `dist/realworn-<version>.zip`. You can also
-   download a release zip.
+1. Download `realworn-<version>.zip` from the [latest release](https://github.com/nabrahma/RealWorn/releases/latest),
+   or build it yourself: `python scripts/package.py` writes `dist/realworn-<version>.zip`.
 2. In Blender: **Edit > Preferences > Get Extensions > Install from Disk**, and pick the zip.
 3. In the add-on preferences, set a **Texture Library** folder, such as your Poly Haven or
    ambientCG downloads, used as they are.
@@ -227,8 +232,10 @@ python scripts/package.py                  # dist/realworn-<version>.zip
 
 ## Contributing
 
-Issues and pull requests are welcome. Please run both test suites before opening a pull request,
-and add a test with each change.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests and the
+design rules, and [CHANGELOG.md](CHANGELOG.md) for what changed in each release. Everyone taking part
+follows the [Code of Conduct](CODE_OF_CONDUCT.md); report security problems as described in
+[SECURITY.md](SECURITY.md).
 
 ## Licence
 
