@@ -354,12 +354,19 @@ class RW_Preferences(bpy.types.AddonPreferences):
     recent_textures: StringProperty(name="Recent", default="[]", options={"HIDDEN"})
     developer_mode: BoolProperty(name="Developer Mode", default=False,
                                  description="Show Reload Add-on in the Debug panel")
+    check_updates: BoolProperty(name="Check for Updates on Startup", default=True,
+                                description="Ask GitHub for a newer RealWorn when Blender starts "
+                                            "(only while Allow Online Access is on)")
 
     def draw(self, context):
         col = self.layout.column()
         for p in ("mask_storage", "texel_density", "texture_folder", "grunge_folder", "alpha_folder",
                   "decal_folder", "developer_mode"):
             col.prop(self, p)
+        from .ui.panels import draw_updates
+        draw_updates(self.layout.box(), full=True)
+        col = self.layout.column()
+        col.prop(self, "check_updates")
 
 
 def prefs():

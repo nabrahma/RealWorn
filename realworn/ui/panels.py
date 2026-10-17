@@ -370,11 +370,48 @@ def _bake_rows(layout, mat):
     op(col, "realworn.bake_sources", text="Bake Edges and AO", icon="MOD_BEVEL")
 
 
+def draw_updates(layout, full=False):
+    """The update notice (the sidebar shows it only when there is news; the add-on preferences
+    always show it, with Check for Updates)."""
+    from ..core import update
+    from ..operators import update as U
+    status, info, message = U.STATE["status"], U.STATE["info"], U.STATE["message"]
+    if not full and status not in {"AVAILABLE", "DOWNLOADING"}:
+        return
+    col = layout.column(align=True)
+    if full:
+        cur = U.current_version()
+        row = col.row(align=True)
+        row.label(text="RealWorn {}".format(update.version_text(cur) if cur else "?"), icon="PACKAGE")
+        op(row, "realworn.update_check", text="Check for Updates", icon="FILE_REFRESH")
+        if not bpy.app.online_access:
+            col.label(text="Allow Online Access is off (Preferences > System > Network)", icon="INFO")
+    new = update.version_text(info["version"]) if info else ""
+    if status == "CHECKING":
+        col.label(text="Checking GitHub...", icon="SORTTIME")
+    elif status == "LATEST":
+        col.label(text="Up to date", icon="CHECKMARK")
+    elif status == "DOWNLOADING":
+        col.label(text="Downloading RealWorn {}...".format(new), icon="IMPORT")
+    elif status == "ERROR":
+        col.label(text=message, icon="ERROR")
+    elif status == "AVAILABLE":
+        repo, why = U.target()
+        if repo is None:
+            col.label(text="RealWorn {} is available".format(new), icon="INFO")
+            if full:
+                col.label(text=why)
+            col.operator("wm.url_open", text="Open the Release Page", icon="URL").url = info["page"]
+        else:
+            op(col, "realworn.update_install", text="Update to RealWorn {}".format(new), icon="IMPORT")
+
+
 class _PanelBody:
     bl_label = "RealWorn"
 
     def draw(self, context):
         layout = self.layout
+        draw_updates(layout)
         ob, mat = _context_material(context)
         if ob is None or ob.type != "MESH":
             layout.label(text="Select a mesh object", icon="INFO")
