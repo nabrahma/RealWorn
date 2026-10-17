@@ -28,7 +28,8 @@ UV_ITEMS = [("CUBE", "Cube Projection", "Cube Projection then Pack Islands (the 
             ("EXISTING", "Use Existing", "Copy the object's own UV map (clean, non-overlapping layouts)")]
 RES_ITEMS = [(str(r), str(r), "") for r in (256, 512, 1024, 2048, 4096)]
 DECAL_RES_ITEMS = [("2048", "2K", ""), ("4096", "4K", "Recommended"), ("8192", "8K", "Large buildings")]
-PUDDLE_PRESET_ITEMS = [(k, n, "Water level, halo and depth look: {}".format(n.lower())) for k, n, _ in P.PRESETS]
+PUDDLE_PRESET_ITEMS = [(k, n, ("A wet film over every flat face, plus puddles: {}" if k in P.FILM_PRESETS else
+                               "Water level, halo and depth look: {}").format(n.lower())) for k, n, _ in P.PRESETS]
 SURFACE_ITEMS = [("NONE", "Custom", "Keep your own Height Scale and dip settings")] + [
     (k, n, "Height Scale and broad dips for {}".format(n.lower())) for k, n, _ in P.SURFACES]
 PUDDLE_SOURCE_ITEMS = [("AUTO", "Auto", "Water collects in the low spots of the ground, nothing painted"),
@@ -272,6 +273,24 @@ class RWLayer(bpy.types.PropertyGroup):
                              description="A faint darker ring at the outer edge of the damp halo")
     debris_settle: FloatProperty(name="Debris Settle", default=0.0, min=0.0, max=1.0, update=_v("debris_settle"),
                                  description="Darkening in the deepest water, like silt")
+    # Wet Film: a thin skin of water over every flat face (0: off, no extra nodes)
+    wet_film: FloatProperty(name="Wet Film", default=0.0, min=0.0, max=1.0, update=_v("wet_film"),
+                            description="Rain-soaked ground: every flat face glossy under a thin film of water")
+    film_relief: FloatProperty(name="Relief Through Film", default=P.FILM_DEFAULTS["film_relief"], min=0.0,
+                               max=1.0, update=_v("film_relief"),
+                               description="How much the ground's relief breaks the film's reflections into "
+                                           "streaks (0: mirror)")
+    film_grunge: PointerProperty(name="Film Breakup", type=bpy.types.Image, update=_struct,
+                                 description="The texture that varies the film (empty: Noise)")
+    film_scale_m: FloatProperty(name="Film Scale", default=P.FILM_DEFAULTS["film_scale_m"], min=0.2, max=10.0,
+                                subtype="DISTANCE", update=_v("film_scale_m"),
+                                description="Size of the film's wet and calm patches in metres, independent of "
+                                            "the texture")
+    dry_patches: FloatProperty(name="Dry Patches", default=P.FILM_DEFAULTS["dry_patches"], min=0.0, max=1.0,
+                               update=_v("dry_patches"), description="Patches where the film has dried (0: wet "
+                                                                     "everywhere)")
+    film_gloss: FloatProperty(name="Film Gloss", default=P.FILM_DEFAULTS["film_gloss"], min=0.0, max=0.2,
+                              update=_v("film_gloss"), description="Coat roughness of a full film")
     show_advanced: BoolProperty(name="Advanced", default=False)
 
 

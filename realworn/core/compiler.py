@@ -32,7 +32,8 @@ from ..builders._dsl import SOCKET_TYPES, Tree
 _suspended = set()
 SOURCE_VIEW = {}  # material name -> layer id: Mask View shows that layer's raw source (Bake Edges and AO)
 PUDDLE_PROBE = {}  # material name -> "water" | "deep" | "edge" | "halo" | "wet" | "depth" (d / 40 + 0.5) |
-#                    "relief" | "gate" | "color" | "roughness" | "coat": tests read one quantity through Mask View
+#                    "relief" | "gate" | "color" | "roughness" | "coat" | "film" | "film_relief": tests read
+#                    one quantity through Mask View
 COMPILES = {"count": 0}  # tests read this to prove value edits do not recompile
 BOX_BLEND = 0.3          # SET-3: the classic Box projection blend
 _LAYER_PATH = re.compile(r"^realworn\.layers\[(\d+)\](?:\.(texture))?$")
@@ -442,8 +443,9 @@ def blend(b, layer, mask, lay, cur, ctx):
 # ---------------------------------------------------------------- puddle
 PUDDLE_VALUES = ("water_level_mm", "height_scale_mm", "paint_depth_mm", "dip_depth_mm", "depth_look_mm", "halo",
                  "edge_width_mm", "halo_width_mm", "deep_threshold_mm", "darkening", "flat_threshold",
-                 "wind_ripple", "tide_mark", "debris_settle")
-PUDDLE_LEAN = ("wind_ripple", "tide_mark", "debris_settle")  # nodes only above 0: crossing 0 recompiles
+                 "wind_ripple", "tide_mark", "debris_settle", "wet_film", "film_relief", "dry_patches",
+                 "film_gloss")
+PUDDLE_LEAN = ("wind_ripple", "tide_mark", "debris_settle", "wet_film")  # nodes only above 0: crossing 0 recompiles
 
 
 def _pv(b, layer, prop):
@@ -491,12 +493,40 @@ def _puddle_ground(b, mat, layer, ctx):
     return H
 
 
+def _film_breakup(b, layer, n):
+    """One sample of the Film Breakup texture (0..1): Noise, normalised, or a library grunge, box
+    mapped at Film Scale; the second sample (n = 2) is offset so it does not line up."""
+    suffix = "" if n == 1 else str(n)
+    mp = b.named("ShaderNodeMapping", "pud.film_map" + suffix)
+    sc = 1.0 / max(layer.film_scale_m, 1e-3)
+    mp.inputs["Scale"].default_value = (sc, sc, sc)
+    if n != 1:
+        mp.inputs["Location"].default_value = PD.FILM_OFFSET
+    b.links.new(b.shared("ShaderNodeTexCoord", "texcoord").outputs["Object"], mp.inputs["Vector"])
+    if layer.film_grunge is not None:
+        return _image(b, "pud.film_img" + suffix, layer.film_grunge, mp.outputs["Vector"]).outputs["Color"]
+    nz = b.named("ShaderNodeTexNoise", "pud.film_noise" + suffix, Scale=1.0, Detail=3.0, Roughness=0.5)
+    b.links.new(mp.outputs["Vector"], nz.inputs["Vector"])
+    return b.smooth(nz.outputs["Fac"], *PD.FILM_NOISE_RANGE, label="film breakup")
+
+
+def _film(b, layer, gate, D, op):
+    """F (film weight, opacity included) and R (relief through the film) of core/puddle.py."""
+    dry = b.mul(_pv(b, layer, "dry_patches"), b.smooth(_film_breakup(b, layer, 1), *PD.FILM_RAMP, label="dry"))
+    F = b.mul_all(_pv(b, layer, "wet_film"), gate, b.inv(dry), op)
+    b2 = b.math("MULTIPLY_ADD", _film_breakup(b, layer, 2), 1.0 - PD.FILM_RELIEF_MIN, PD.FILM_RELIEF_MIN,
+                label="relief: calm .. scattered patches")
+    R = b.mul_all(_pv(b, layer, "film_relief"), b2, b.inv(D))
+    return F, R
+
+
 def puddle(b, mat, layer, cur, ctx, view=False):
     """Water where the water level is above the ground: depth d = L - H' per point (core/puddle.py),
     then porosity darkening, absorption with depth, a clear coat at IOR 1.33 and a relief fade."""
     st = mat.realworn
     painted = layer.puddle_source != "AUTO" and layer.mask_image is not None
-    if layer.puddle_source == "PAINT" and not painted:
+    unpainted = layer.puddle_source == "PAINT" and not painted
+    if unpainted and layer.wet_film <= 0:
         return  # Paint only, nothing painted yet: no water anywhere (lean)
     op = b.named("ShaderNodeMath", "opacity", props={"operation": "MULTIPLY"})
     op.inputs[0].default_value, op.inputs[1].default_value = 1.0, layer.opacity
@@ -521,6 +551,8 @@ def puddle(b, mat, layer, cur, ctx, view=False):
         if layer.puddle_source == "PAINT":
             lift = b.mul(b.inv(P), b.add(pdep, PD.PAINT_LIFT))
             Hp = b.add(Hp, lift)
+    elif unpainted:  # the film shows; the water waits for paint
+        Hp = b.add(Hp, b.add(_pv(b, layer, "paint_depth_mm"), PD.PAINT_LIFT))
     L = _pv(b, layer, "water_level_mm")
     d = b.sub(L, Hp)
     # flat faces only
@@ -538,9 +570,12 @@ def puddle(b, mat, layer, cur, ctx, view=False):
     Hh = _smooth(b, d, outer, neg_e, "pud.halo")
     wet = b.max(b.mul(Hh, PD.HALO_WETNESS), E)
     Wo, Do, Eo, Ho, weto = b.mul(W, op), b.mul(D, op), b.mul(E, op), b.mul(Hh, op), b.mul(wet, op)
+    F = R = None
+    if layer.wet_film > 0:  # a thin skin of water over every flat face (lean: no nodes at 0)
+        F, R = _film(b, layer, gate, D, op)
     # colour: porosity darkening, then the ground seen through the water
     por = b.maprange(cur["Roughness"], 0.5, 0.9, label="porosity")
-    k = b.mul_all(b.inv(cur["Metallic"]), por, weto, _pv(b, layer, "darkening"))
+    k = b.mul_all(b.inv(cur["Metallic"]), por, weto if F is None else b.max(weto, F), _pv(b, layer, "darkening"))
     keep = b.math("MULTIPLY_ADD", k, -(1.0 - PD.DARKEST), 1.0, label="wet: keep")
     c_wet = b.mix(1.0, cur["Base Color"], keep, blend="MULTIPLY")
     look = _pv(b, layer, "depth_look_mm")
@@ -560,13 +595,24 @@ def puddle(b, mat, layer, cur, ctx, view=False):
     # roughness
     r = b.mul(cur["Roughness"], b.math("MULTIPLY_ADD", Ho, -(1.0 - PD.HALO_ROUGHNESS), 1.0))
     r = b.mul(r, b.math("MULTIPLY_ADD", Eo, -(1.0 - PD.EDGE_ROUGHNESS / PD.HALO_ROUGHNESS), 1.0))
+    if F is not None:
+        r = b.mul(r, b.math("MULTIPLY_ADD", F, -PD.FILM_ROUGHNESS, 1.0))
     cur["Roughness"] = b.mixf(Wo, r, PD.WATER_ROUGHNESS)
     # the water is a clear coat
     if "Coat Weight" in cur:
-        cur["Coat Weight"] = b.max(cur["Coat Weight"], Eo)
-        cr = b.mixf(D, b.mixf(W, PD.COAT_ROUGHNESS[0], PD.COAT_ROUGHNESS[1]), PD.COAT_ROUGHNESS[2])
-        cur["Coat Roughness"] = b.mixf(Eo, cur["Coat Roughness"], cr)
-        cur["Coat IOR"] = b.mixf(Eo, cur["Coat IOR"], PD.COAT_IOR)
+        if F is None:
+            cur["Coat Weight"] = b.max(cur["Coat Weight"], Eo)
+            cr = b.mixf(D, b.mixf(W, PD.COAT_ROUGHNESS[0], PD.COAT_ROUGHNESS[1]), PD.COAT_ROUGHNESS[2])
+            cur["Coat Roughness"] = b.mixf(Eo, cur["Coat Roughness"], cr)
+            cur["Coat IOR"] = b.mixf(Eo, cur["Coat IOR"], PD.COAT_IOR)
+        else:  # the film's coat on flat faces outside the water; the water's coat inside it
+            present = b.mul(gate, op)
+            cur["Coat Weight"] = b.max(b.max(cur["Coat Weight"], Eo), F)
+            cr = b.mixf(D, b.mixf(W, PD.COAT_ROUGHNESS[0], PD.COAT_ROUGHNESS[1]), PD.COAT_ROUGHNESS[2])
+            film_r = b.mixf(F, PD.FILM_COAT_ROUGHNESS, _pv(b, layer, "film_gloss"), label="film gloss")
+            film_r = b.mixf(present, cur["Coat Roughness"], film_r)
+            cur["Coat Roughness"] = b.mixf(Eo, film_r, cr)
+            cur["Coat IOR"] = b.mixf(b.max(Eo, present), cur["Coat IOR"], PD.COAT_IOR)
         flat = cur["Coat Normal"]
         if layer.wind_ripple > 0:
             rip = b.named("ShaderNodeTexNoise", "pud.ripple", Scale=PD.RIPPLE_SCALE, Detail=3.0, Roughness=0.6)
@@ -577,7 +623,7 @@ def puddle(b, mat, layer, cur, ctx, view=False):
             b.set(bump.inputs["Normal"], flat)
             flat = bump.outputs["Normal"]
         if not layer.true_depth:
-            ctx["coat_flat"].append((Wo, flat))
+            ctx["coat_flat"].append((Wo, flat, R))
         else:
             cur["Coat Normal"] = flat
         if layer.water_tint == "OILY":
@@ -602,7 +648,8 @@ def puddle(b, mat, layer, cur, ctx, view=False):
                                 "depth": b.math("MULTIPLY_ADD", d, 1.0 / 40.0, 0.5, clamp=True),
                                 "relief": ctx["relief"] if ctx["relief"] is not None else 1.0,
                                 "gate": gate, "color": cur["Base Color"], "roughness": cur["Roughness"],
-                                "coat": cur.get("Coat Weight", 0.0)}[probe]
+                                "coat": cur.get("Coat Weight", 0.0), "film": F if F is not None else 0.0,
+                                "film_relief": R if R is not None else 0.0}[probe]
         else:
             ctx["mask_view"] = Wo
         v = PD.VIEW_COLORS
@@ -614,9 +661,11 @@ def puddle(b, mat, layer, cur, ctx, view=False):
 
 def _relief(b, cur, ctx):
     """With a Puddle layer the stack's height becomes a Bump node whose Strength fades under the
-    water (Displacement is then left unplugged); the water's coat normal is flat."""
+    water (Displacement is then left unplugged); the water's coat normal is flat. A wet film's coat
+    follows its own Bump of the same height, at the film's relief strength."""
     if ctx["relief"] is None:
         return
+    pre, height = cur["Normal"], ctx["height"]
     if ctx["height"] is not None:
         bump = b.named("ShaderNodeBump", "relief", Distance=1.0)
         b.set(bump.inputs["Strength"], ctx["relief"])
@@ -625,8 +674,15 @@ def _relief(b, cur, ctx):
         cur["Normal"] = bump.outputs["Normal"]
         ctx["height"] = None
     if "Coat Normal" in cur:
-        for w, flat in ctx["coat_flat"]:
-            cur["Coat Normal"] = b.vmath("NORMALIZE", b.mixv(w, cur["Normal"], flat))
+        for i, (w, flat, R) in enumerate(ctx["coat_flat"]):
+            ground = cur["Normal"]
+            if R is not None and height is not None:
+                fb = b.named("ShaderNodeBump", "film_relief.{}".format(i), Distance=1.0)
+                b.set(fb.inputs["Strength"], R)
+                b.set(fb.inputs["Height"], height)
+                b.set(fb.inputs["Normal"], pre)
+                ground = fb.outputs["Normal"]
+            cur["Coat Normal"] = b.vmath("NORMALIZE", b.mixv(w, ground, flat))
 
 
 # ---------------------------------------------------------------- compile
@@ -753,6 +809,9 @@ def _puddle_targets(g, layer, prop):
     if prop == "dip_scale_m":
         sc = 1.0 / max(layer.dip_scale_m, 1e-3)
         return [(lid, "pud.dip_map", "Scale", (sc, sc, sc))]
+    if prop == "film_scale_m":
+        sc = 1.0 / max(layer.film_scale_m, 1e-3)
+        return [(lid, role, "Scale", (sc, sc, sc)) for role in ("pud.film_map", "pud.film_map2")]
     if prop == "tint_color":
         return [(lid, "pud.tint", None, tuple(layer.tint_color))] if layer.water_tint == "CUSTOM" else []
     if prop == "opacity":

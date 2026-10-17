@@ -180,8 +180,8 @@ def _mask_rows(layout, layer):
 
 
 def draw_puddle(layout, context, ob, mat, layer):
-    """Puddle: Preset, Source, Water Level, Depth Look, Halo, Water Tint, True Depth, Brush; the
-    rest under Advanced."""
+    """Puddle: Preset, Source, Water Level, Depth Look, Halo, Water Tint, Wet Film (Relief Through
+    Film, Film Breakup and Scale), True Depth, Brush; the rest under Advanced."""
     box = layout.box()
     box.label(text="Selected: {}".format(layer.name), icon=K.INFO["PUDDLE"]["icon"])
     col = box.column(align=True)
@@ -196,6 +196,19 @@ def draw_puddle(layout, context, ob, mat, layer):
     row.prop(layer, "water_tint", text="")
     if layer.water_tint == "CUSTOM":
         col.prop(layer, "tint_color")
+    col = box.column(align=True)
+    col.prop(layer, "wet_film", slider=True)
+    if layer.wet_film > 0:
+        col.prop(layer, "film_relief", slider=True)
+        row = col.row(align=True)
+        row.label(text="Film Breakup")
+        o = op(row, "realworn.breakup_pick", text=layer.film_grunge.name if layer.film_grunge else "Noise",
+               icon="TEXTURE")
+        o.layer, o.target = layer.id, "FILM"
+        if layer.film_grunge is not None:
+            o = op(row, "realworn.breakup_pick", text="", icon="X")
+            o.layer, o.target, o.grunge = layer.id, "FILM", "NOISE"
+        row.prop(layer, "film_scale_m", text="Scale")
     row = box.row(align=True)
     row.prop(layer, "true_depth")
     if layer.true_depth:
@@ -239,6 +252,9 @@ def draw_puddle(layout, context, ob, mat, layer):
         row.prop(layer, "tide_mark", slider=True)
         row.prop(layer, "debris_settle", slider=True)
         adv.prop(layer, "flat_threshold", slider=True)
+        row = adv.row(align=True)
+        row.prop(layer, "dry_patches", slider=True)
+        row.prop(layer, "film_gloss", slider=True)
         if layer.puddle_source != "AUTO":
             adv.prop(layer, "mask_res")
             _mask_rows(adv, layer)

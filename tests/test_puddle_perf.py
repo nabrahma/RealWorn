@@ -109,6 +109,34 @@ def test_cycles_overhead_puddles_on_the_road(empty_scene, out_dir):
         pytest.xfail("over budget: " + ", ".join(over))
 
 
+def test_cycles_overhead_of_the_wet_film(empty_scene, out_dir):
+    """Wet Film 1 against the same puddles without it, in the window framing (the film's look):
+    budget +15% at fixed samples; Cycles defaults reported."""
+    sc = empty_scene
+    pairs = PW.build_pair(sc, marking=False)
+    PW.show(pairs, "realworn")
+    device = ru.use_gpu(sc) or "CPU"
+    MR.frame(sc, "WINDOW")
+    puddles = _measure(sc, out_dir, "window_puddles")
+    from realworn.core import grunge
+    for key in pairs:
+        values = dict(PW.FILM[key])
+        if values.get("film_grunge"):
+            values["film_grunge"] = grunge.load("grunges", values["film_grunge"])
+        _set_all({key: pairs[key]}, **values)
+    film = _measure(sc, out_dir, "window_film")
+    ov = {m: (film[m] - puddles[m]) / puddles[m] * 100 for m in ("default", "fixed")}
+    note = "best of 3, {}, window framing {}x{}; vs the same puddles without the film".format(device, *RES)
+    for m in ("default", "fixed"):
+        print("\n[film overhead] {} {}: puddles {:.2f} s, with the film {:.2f} s (+{:.0f}%)".format(
+            device, m, puddles[m], film[m], ov[m]))
+    record("Wet film Cycles overhead over puddles, window framing, GPU fixed 1024 spp", ov["fixed"], "%", 15, note)
+    record("Wet film Cycles overhead over puddles, window framing, GPU defaults", ov["default"], "%", None, note)
+    assert ov["fixed"] < 80, "regression"
+    if ov["fixed"] > 15:
+        pytest.xfail("over budget: fixed samples +{:.0f}%".format(ov["fixed"]))
+
+
 def test_puddle_mask_memory(empty_scene):
     """A 2048 px float paint mask: 64 MB, as a Reveal mask."""
     assert images.mask_bytes(2048, True) / 2 ** 20 == 64

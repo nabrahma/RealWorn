@@ -9,7 +9,7 @@ from .common import resolve_layer, resolve_material
 
 
 class RW_OT_breakup_pick(bpy.types.Operator):
-    """Use the grunge picked in the library as this layer's Breakup"""
+    """Use the grunge picked in the library as this layer's Breakup (or a Puddle's Film Breakup)"""
     bl_idname = "realworn.breakup_pick"
     bl_label = "Use Grunge"
     bl_options = {"REGISTER", "UNDO"}
@@ -18,8 +18,11 @@ class RW_OT_breakup_pick(bpy.types.Operator):
     object: StringProperty(name="Object", default="")
     material: StringProperty(name="Material", default="")
     layer: StringProperty(name="Layer ID", default="")
+    target: StringProperty(name="Target", default="BREAKUP", description="BREAKUP, or FILM: a Puddle's Film Breakup")
 
     def invoke(self, context, event):
+        if self.grunge == "NOISE":
+            return self.execute(context)
         return context.window_manager.invoke_props_dialog(self, width=360)
 
     def draw(self, context):
@@ -31,12 +34,18 @@ class RW_OT_breakup_pick(bpy.types.Operator):
         if mat is None or not injector.is_setup(mat) or not len(mat.realworn.layers):
             return {"CANCELLED"}
         layer = mat.realworn.layers[resolve_layer(mat, self.layer)]
+        if self.target == "FILM" and self.grunge == "NOISE":
+            layer.film_grunge = None
+            return {"FINISHED"}
         key = self.grunge or context.scene.realworn.grunge
         try:
             img = grunge.load("grunges", key)
         except KeyError:
             self.report({"WARNING"}, "Grunge '{}' not found".format(key))
             return {"CANCELLED"}
+        if self.target == "FILM":  # the film keeps its own scale
+            layer.film_grunge = img
+            return {"FINISHED"}
         with compiler.batch(mat):
             layer.breakup_grunge = img
             layer.breakup_scale = grunge.suggested_scale(img, layer.breakup_scale)
