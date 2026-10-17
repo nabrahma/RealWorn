@@ -35,6 +35,8 @@ Remove restores your original material exactly.
   Wear, Dirt and Puddle.
 - **Puddles.** Standing water in one click or painted, filling grout and dips first, with real depth:
   darker wet ground, a clear coat, deep water as a flat mirror.
+- **Wet film.** Rain-soaked pavement in one slider: every flat stone glossy under a thin film of
+  water that follows its relief, so lit windows and signs reflect as broken, streaky smears.
 - **One mask recipe for everything.** A source minus a grunge, then a ramp. You control it with
   three sliders: Breakup, Sharpness and Threshold.
 - **Painting with Blender's own brushes.** Four ready-made brushes:
@@ -151,7 +153,8 @@ collects where a water level is above the ground, so it fills grout, cracks and 
 follows the surface's grain, even where you paint it.
 
 1. Select a road, floor or yard that is set up, with a texture loaded on the Base.
-2. **Add > Puddle > Wet** (or Damp, Puddles, Soaked). The layer goes on top of the stack.
+2. **Add > Puddle > Wet** (or Damp, Puddles, Soaked; Rain-soaked, Just Rained and Drying add a wet
+   film). The layer goes on top of the stack.
 3. Drag **Water Level**: down for water only in the cracks, up for large pools.
 4. For water exactly where you want it, set **Source** to Auto and Paint (the default) and click
    **Paint**:
@@ -190,6 +193,37 @@ with the water held flat between raised stones, for low close-ups in Cycles.
 - In EEVEE, turn on **Ray Tracing** (Render Properties) for sharp reflections. The layer row
   reminds you.
 - **Bake Material** bakes the coat too, so baked puddles stay wet.
+
+### Wet film: rain-soaked ground
+
+Right after rain, every flat stone is glossy, not only the puddles. The water is a skin so thin
+that it follows the stone's surface, so a lit window reflects as a broken, streaky smear. Where
+the skin lies a little thicker, the reflection calms and sharpens.
+
+**Wet Film** (0 to 1, on the Puddle layer) adds that skin over every flat face. Kerbs and walls
+stay dry, as with puddles. Puddles keep their look on top: standing water is still a flat mirror.
+
+| Control | What it does |
+| --- | --- |
+| **Wet Film** | how wet the ground is: darker by porosity, less rough, a glossy clear coat |
+| **Relief Through Film** | how much the stone's relief breaks the reflections (0: a mirror; default 0.6) |
+| **Film Breakup** and **Scale** | Noise, or any grunge from the library, at its own size in metres (default 1.5 m), so the calm and broken patches never repeat with the texture |
+| Dry Patches (Advanced) | patches where the film has dried (default 0: wet everywhere) |
+| Film Gloss (Advanced) | the coat's roughness under a full film (default 0.02) |
+
+Presets on the Puddle menu:
+
+| Preset | Wet Film | Relief | Dry Patches | Water Level |
+| --- | --- | --- | --- | --- |
+| Rain-soaked | 1.0 | 0.6 | 0 | −4 mm (Damp) |
+| Just Rained | 0.8 | 0.5 | 0.2 | −2 mm (Wet) |
+| Drying | 0.5 | 0.4 | 0.6 | −4 mm (Damp) |
+
+Damp, Wet, Puddles and Soaked set Wet Film to 0. At 0 the film adds nothing to the material.
+
+Wet ground needs something bright and low to reflect: lit windows, signs, street lamps. With True
+Depth on, the film follows the displaced ground itself. Bake Material keeps the film: its coat
+weight, roughness and normal are baked.
 
 ## Edge Wear and Dirt in EEVEE
 
@@ -241,6 +275,9 @@ without them:
 | With painting and broad dips, fixed / defaults | +25% / +118% (broad dips add much more water) |
 | True Depth, low close-up | +61% over shading only |
 | Puddle paint mask, 1 m object | 64 MB (2048 px float) |
+
+Wet Film over the same puddles, at a lit storefront (960 x 540): +11% at fixed 1024 samples, +4%
+with Cycles defaults.
 
 Bake Material before heavy final renders.
 

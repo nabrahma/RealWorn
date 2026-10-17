@@ -6,6 +6,27 @@ All notable changes to RealWorn are listed here. The format follows
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-10-17
+
+### Added
+- **Wet Film** on the Puddle layer: rain-soaked ground, every flat face glossy under a thin film of
+  water that follows the stone's relief, so reflections break into streaks.
+  - Relief Through Film, Film Breakup (Noise or a library grunge) with its own Scale, Dry Patches
+    and Film Gloss.
+  - Presets: Rain-soaked, Just Rained and Drying. Damp, Wet, Puddles and Soaked keep the film off.
+  - Standing water keeps its flat-mirror look on top of the film; kerbs and walls stay dry.
+  - At Wet Film 0 the material is exactly as before.
+  - Bake Material keeps the film.
+- A storefront framing in the reference road scene (a lit window and a red light), and the wet
+  film in the plain-node puddle reference.
+
+### Fixed
+- **Bake Material** baked normal maps turned by 90° on faces where Cube Projection rotated the
+  paint UV map against the object's own UV map, so baked relief was lit from the wrong side. The
+  bake took its tangents from the selected UV map; it now uses the paint UV map.
+- With a Puddle layer, Bake Material bakes the coat's normal on its own instead of averaging it
+  into the ground's.
+
 ## [3.3.0] - 2026-10-17
 
 ### Added
@@ -101,7 +122,8 @@ A rebuild around a simpler model: every layer is a material plus a mask.
 - First release: procedural masks, material injector with exact removal, presets, scene
   weather, projector decals, boolean damage, and bake to textures.
 
-[Unreleased]: https://github.com/nabrahma/RealWorn/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/nabrahma/RealWorn/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/nabrahma/RealWorn/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/nabrahma/RealWorn/compare/v3.0.0...v3.3.0
 [3.0.0]: https://github.com/nabrahma/RealWorn/compare/v2.1.0...v3.0.0
 [2.1.0]: https://github.com/nabrahma/RealWorn/compare/v2.0.0...v2.1.0
