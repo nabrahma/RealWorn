@@ -5,6 +5,7 @@ version = "3.0.0"
 name = "RealWorn"
 tagline = "Paintable texture layers for realistic buildings and surfaces"
 maintainer = "Nabaskar"
+website = "https://github.com/nabrahma/RealWorn"
 type = "add-on"
 blender_version_min = "5.2.0"
 
