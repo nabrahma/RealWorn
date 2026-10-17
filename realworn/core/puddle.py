@@ -27,6 +27,20 @@ Zones (smooth steps on d, all widths in mm)
 
 Water only stands on near-horizontal faces: where the world normal's Z is below the flat
 threshold, d is pushed far below zero (a smooth gate), so kerbs and walls stay dry.
+
+Wet film (Wet Film above 0): a skin of water over every flat stone, glossy but thin enough to
+follow the stone's relief, so reflections break into streaks
+
+  F = Wet Film x gate x (1 - Dry Patches x ramp(B1)) x opacity     how wet (film weight)
+  R = Relief Through Film x lerp(0.2, 1, B2) x (1 - deep)            relief showing through it
+
+B1 and B2 are two samples of the Film Breakup texture (Noise, or a grunge from the library) at
+its own scale, the second one offset, so some patches mirror and others scatter. The Noise
+breakup is normalised with smoothstep(0.3, 0.7) of its value; a grunge is used as it is. ramp is
+smoothstep(0.4, 0.6). F acts as extra wetness out of the water: porosity darkening with max(wet,
+F), base roughness x (1 - 0.7 F), Coat Weight max(coat, F), Coat Roughness lerp(0.12, Film
+Gloss, F) on flat faces, Coat IOR 1.33, and the coat normal a Bump of the shared height at
+strength R. Standing water keeps the puddle look exactly.
 """
 
 import math
@@ -55,13 +69,27 @@ TINTS = {
 }
 MUDDY_ABSORPTION = 0.5   # muddy water hides the ground twice as fast
 
-# Water Level presets (the Add menu and the layer's Preset): level, halo, depth look.
+FILM_NOISE_RANGE = (0.3, 0.7)   # Noise breakup: its value normalised to 0..1
+FILM_RAMP = (0.4, 0.6)          # ramp(B1): where Dry Patches dry the film
+FILM_OFFSET = (0.37, 0.71, 0.13)  # B2: the breakup sampled again this far away (in tiles)
+FILM_RELIEF_MIN = 0.2           # the calmest patches keep 20 % of the relief
+FILM_ROUGHNESS = 0.7            # full film multiplies base roughness by 1 - 0.7
+FILM_COAT_ROUGHNESS = 0.12      # coat roughness at the faintest film (Film Gloss at full film)
+FILM_DEFAULTS = dict(film_relief=0.6, film_scale_m=1.5, dry_patches=0.0, film_gloss=0.02)
+
+# Level presets (the Add menu and the layer's Preset): level, halo, depth look, and the wet film.
+_DAMP = dict(water_level_mm=-4.0, halo=1.3, depth_look_mm=8.0)
+_WET = dict(water_level_mm=-2.0, halo=1.0, depth_look_mm=8.0)
 PRESETS = (
-    ("DAMP", "Damp", dict(water_level_mm=-4.0, halo=1.3, depth_look_mm=8.0)),
-    ("WET", "Wet", dict(water_level_mm=-2.0, halo=1.0, depth_look_mm=8.0)),
-    ("PUDDLES", "Puddles", dict(water_level_mm=0.5, halo=1.0, depth_look_mm=8.0)),
-    ("SOAKED", "Soaked", dict(water_level_mm=4.0, halo=0.8, depth_look_mm=10.0)),
+    ("DAMP", "Damp", dict(_DAMP, wet_film=0.0)),
+    ("WET", "Wet", dict(_WET, wet_film=0.0)),
+    ("PUDDLES", "Puddles", dict(water_level_mm=0.5, halo=1.0, depth_look_mm=8.0, wet_film=0.0)),
+    ("SOAKED", "Soaked", dict(water_level_mm=4.0, halo=0.8, depth_look_mm=10.0, wet_film=0.0)),
+    ("RAIN_SOAKED", "Rain-soaked", dict(_DAMP, wet_film=1.0, film_relief=0.6, dry_patches=0.0)),
+    ("JUST_RAINED", "Just Rained", dict(_WET, wet_film=0.8, film_relief=0.5, dry_patches=0.2)),
+    ("DRYING", "Drying", dict(_DAMP, wet_film=0.5, film_relief=0.4, dry_patches=0.6)),
 )
+FILM_PRESETS = ("RAIN_SOAKED", "JUST_RAINED", "DRYING")
 DEFAULT_PRESET = "WET"
 
 # Surface presets: how much height the base map spans, and broad dips for flat-ish surfaces.
@@ -193,10 +221,11 @@ def absorption(d, depth_look_mm, tint="CLEAR"):
 
 
 def look(color, roughness, metallic, d, z, opacity=1.0, darkening=1.0, depth_look_mm=8.0, tint_rgb=TINTS["CLEAR"],
-         tint="CLEAR", debris=0.0, tide=0.0):
+         tint="CLEAR", debris=0.0, tide=0.0, film=0.0):
     """Base colour (per channel, same shape as `color`'s channels) and base roughness under the
-    puddle. `color` is a sequence of three channels (floats or arrays); `z` is zones(d)."""
-    wet = z["wet"] * opacity
+    puddle. `color` is a sequence of three channels (floats or arrays); `z` is zones(d); `film` is
+    the wet film weight F (opacity included)."""
+    wet = maximum(z["wet"] * opacity, film)
     k = (1.0 - metallic) * porosity(roughness) * wet * darkening
     keep = 1.0 - (1.0 - DARKEST) * k
     a = absorption(d, depth_look_mm, tint)
@@ -210,22 +239,43 @@ def look(color, roughness, metallic, d, z, opacity=1.0, darkening=1.0, depth_loo
         c1 = c1 * (1.0 - TIDE * tide * 4.0 * hal * (1.0 - hal))
         out.append(c1)
     r = roughness * (1.0 - (1.0 - HALO_ROUGHNESS) * hal) * (1.0 - (1.0 - EDGE_ROUGHNESS / HALO_ROUGHNESS) * z["edge"] * opacity)
+    r = r * (1.0 - FILM_ROUGHNESS * film)
     r = lerp(r, WATER_ROUGHNESS, water)
     return out, r
 
 
-def coat(z, opacity=1.0, weight_in=0.0, roughness_in=0.03, ior_in=1.5):
-    """(Coat Weight, Coat Roughness, Coat IOR)."""
+def coat(z, opacity=1.0, weight_in=0.0, roughness_in=0.03, ior_in=1.5, film=None, gloss=0.02, gate=1.0):
+    """(Coat Weight, Coat Roughness, Coat IOR). With a wet film (`film` = F, opacity included),
+    flat faces (`gate`) take the film's coat roughness and IOR outside the water."""
     e = z["edge"] * opacity
     w_zone = maximum(weight_in, e)
     cr_zone = lerp(lerp(COAT_ROUGHNESS[0], COAT_ROUGHNESS[1], z["water"]), COAT_ROUGHNESS[2], z["deep"])
-    return w_zone, lerp(roughness_in, cr_zone, e), lerp(ior_in, COAT_IOR, e)
+    if film is None:
+        return w_zone, lerp(roughness_in, cr_zone, e), lerp(ior_in, COAT_IOR, e)
+    present = gate * opacity
+    film_r = lerp(roughness_in, lerp(FILM_COAT_ROUGHNESS, gloss, film), present)
+    return (maximum(w_zone, film), lerp(film_r, cr_zone, e), lerp(ior_in, COAT_IOR, maximum(e, present)))
 
 
 def relief(d, z, depth_look_mm=8.0, opacity=1.0, tint="CLEAR"):
     """Bump strength: ground relief fades with depth and is flat in deep water."""
     fade = absorption(d, depth_look_mm, tint) * (1.0 - z["deep"])
     return 1.0 - opacity * (1.0 - fade)
+
+
+def film_breakup_noise(fac):
+    """The Noise breakup's value normalised to 0..1."""
+    return smoothstep(FILM_NOISE_RANGE[0], FILM_NOISE_RANGE[1], fac)
+
+
+def film_weight(wet_film, b1, dry_patches=0.0, gate=1.0, opacity=1.0):
+    """F: how wet the film is (0..1)."""
+    return wet_film * gate * (1.0 - dry_patches * smoothstep(FILM_RAMP[0], FILM_RAMP[1], b1)) * opacity
+
+
+def film_relief(relief, b2, deep=0.0):
+    """R: the Bump strength of the ground relief in the film's coat normal."""
+    return relief * lerp(FILM_RELIEF_MIN, 1.0, b2) * (1.0 - deep)
 
 
 def true_height(H_lowered, level_mm):

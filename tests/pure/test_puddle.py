@@ -20,8 +20,10 @@ def test_puddle_is_the_seventh_kind_and_on_top():
 
 
 def test_presets_raise_the_water_in_order():
-    levels = [v["water_level_mm"] for _, _, v in P.PRESETS]
-    assert levels == sorted(levels) and [k for k, _, _ in P.PRESETS] == ["DAMP", "WET", "PUDDLES", "SOAKED"]
+    water = [(k, v) for k, _, v in P.PRESETS if k not in P.FILM_PRESETS]
+    levels = [v["water_level_mm"] for _, v in water]
+    assert levels == sorted(levels) and [k for k, _ in water] == ["DAMP", "WET", "PUDDLES", "SOAKED"]
+    assert all(v["wet_film"] == 0.0 for _, v in water)  # 3.3 presets keep the film off
     assert K.defaults("PUDDLE")["water_level_mm"] == P.preset_values(P.DEFAULT_PRESET)["water_level_mm"]
     assert K.defaults("PUDDLE", "SOAKED")["water_level_mm"] > K.defaults("PUDDLE", "DAMP")["water_level_mm"]
 
@@ -162,3 +164,56 @@ def test_opacity_zero_is_no_change():
     col, r = P.look([0.4, 0.3, 0.2], 0.7, 0.0, d, z, opacity=0.0)
     assert np.allclose(col[0], 0.4) and np.allclose(r, 0.7)
     assert np.allclose(P.relief(d, z, opacity=0.0), 1.0)
+
+
+# ------------------------------------------------------------------ wet film
+def test_film_presets_match_the_table():
+    want = {"RAIN_SOAKED": (1.0, 0.6, 0.0, -4.0), "JUST_RAINED": (0.8, 0.5, 0.2, -2.0),
+            "DRYING": (0.5, 0.4, 0.6, -4.0)}
+    for k, (w, r, dry, level) in want.items():
+        v = P.preset_values(k)
+        assert (v["wet_film"], v["film_relief"], v["dry_patches"], v["water_level_mm"]) == (w, r, dry, level)
+    assert K.defaults("PUDDLE")["wet_film"] == 0.0  # new layers: no film unless asked
+
+
+def test_film_weight_dry_patches_and_flat_faces():
+    b1 = np.linspace(0.0, 1.0, 101)
+    assert np.allclose(P.film_weight(1.0, b1), 1.0)  # Dry Patches 0: wet everywhere
+    f = P.film_weight(1.0, b1, dry_patches=0.6)
+    assert f.min() == pytest.approx(0.4) and f.max() == pytest.approx(1.0) and np.all(np.diff(f) <= 1e-9)
+    assert P.film_weight(1.0, 0.2, gate=0.0) == 0.0  # walls and kerb sides stay dry
+    assert P.film_weight(0.5, 0.2, opacity=0.5) == pytest.approx(0.25)
+
+
+def test_film_relief_varies_in_patches_and_vanishes_in_deep_water():
+    assert P.film_relief(0.6, 0.0) == pytest.approx(0.6 * P.FILM_RELIEF_MIN)
+    assert P.film_relief(0.6, 1.0) == pytest.approx(0.6)
+    assert P.film_relief(0.6, 1.0, deep=1.0) == 0.0
+    assert P.film_relief(0.0, 0.7) == 0.0
+    nz = np.linspace(0.0, 1.0, 11)
+    b = P.film_breakup_noise(nz)
+    assert b[0] == 0.0 and b[-1] == 1.0 and np.all(np.diff(b) >= 0)
+
+
+def test_film_channels_out_of_the_water():
+    d = np.array([-30.0])  # dry ground, far from any puddle
+    z = P.zones(d)
+    (c,), r = P.look([np.array([0.5])], np.array([0.8]), 0.0, d, z, film=1.0)
+    (c0,), r0 = P.look([np.array([0.5])], np.array([0.8]), 0.0, d, z)
+    assert c < c0 and r == pytest.approx(r0 * (1.0 - P.FILM_ROUGHNESS))
+    w, cr, ior = P.coat(z, film=np.array([1.0]), gloss=0.02)
+    assert w == pytest.approx(1.0) and cr == pytest.approx(0.02) and ior == pytest.approx(P.COAT_IOR)
+    w, cr, ior = P.coat(z, film=np.array([0.0]), gloss=0.02)
+    assert w == pytest.approx(0.0) and cr == pytest.approx(P.FILM_COAT_ROUGHNESS)
+    w, cr, ior = P.coat(z, film=np.array([0.5]), gloss=0.02, gate=0.0, roughness_in=0.3)  # a wall
+    assert cr == pytest.approx(0.3) and ior == pytest.approx(1.5)
+
+
+def test_film_leaves_standing_water_alone():
+    d = np.array([10.0])  # deep water
+    z = P.zones(d)
+    col = [np.array([0.5]), np.array([0.4]), np.array([0.3])]
+    a, ra = P.look(col, np.array([0.8]), 0.0, d, z)
+    b, rb = P.look(col, np.array([0.8]), 0.0, d, z, film=1.0)
+    assert all(np.allclose(x, y) for x, y in zip(a, b)) and np.allclose(ra, rb)
+    assert np.allclose(P.coat(z), P.coat(z, film=np.array([1.0]), gloss=0.05))
