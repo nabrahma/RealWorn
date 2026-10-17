@@ -6,6 +6,14 @@ All notable changes to RealWorn are listed here. The format follows
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-10-18
+
+### Added
+- **Update to RealWorn x.y.z** in the sidebar: RealWorn checks GitHub for a newer release when
+  Blender starts, then downloads it, checks its checksum and installs it in place with one click.
+  Check for Updates and a startup switch are in the add-on preferences. RealWorn goes online only
+  while Blender's Allow Online Access is on.
+
 ## [3.4.0] - 2026-10-17
 
 ### Added
@@ -122,7 +130,8 @@ A rebuild around a simpler model: every layer is a material plus a mask.
 - First release: procedural masks, material injector with exact removal, presets, scene
   weather, projector decals, boolean damage, and bake to textures.
 
-[Unreleased]: https://github.com/nabrahma/RealWorn/compare/v3.4.0...HEAD
+[Unreleased]: https://github.com/nabrahma/RealWorn/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/nabrahma/RealWorn/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/nabrahma/RealWorn/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/nabrahma/RealWorn/compare/v3.0.0...v3.3.0
 [3.0.0]: https://github.com/nabrahma/RealWorn/compare/v2.1.0...v3.0.0

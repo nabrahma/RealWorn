@@ -68,6 +68,20 @@ Remove restores your original material exactly.
 
 RealWorn lives in the 3D Viewport sidebar, tab **RealWorn**, and in the Image Editor sidebar.
 
+### Updates
+
+From 3.5.0 on, RealWorn updates itself; there is no zip to download.
+
+- When Blender starts, RealWorn asks GitHub for the latest release. If there is a newer one, the
+  sidebar shows **Update to RealWorn x.y.z**: click it, and the release is downloaded, its checksum
+  checked, and installed over the current version.
+- The add-on preferences show the installed version, **Check for Updates**, and **Check for Updates
+  on Startup** to turn the startup check off.
+- RealWorn only goes online while Blender's **Allow Online Access** is on (Preferences > System >
+  Network).
+- A copy linked to a source folder (development) is never installed over; it shows the release page
+  instead.
+
 ## Quick start
 
 1. Select an object and click **Setup**.
